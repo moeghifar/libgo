@@ -4,4 +4,6 @@ The toolset of library written in Go. It should lightweigh, fast and clean. Supp
 
 ## Features
 
-- [ ] Envy - the environment variables loader
+- [x] Envy - the environment variables loader
+- [x] climd - a lightweight command-line interface builder
+ 

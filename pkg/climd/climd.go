@@ -52,7 +52,7 @@ func Run(config AppConfig, args []string) error {
 	}
 
 	ctx := context.Background()
-	
+
 	// Handle global flags
 	if len(args) > 0 {
 		switch args[0] {
@@ -87,7 +87,7 @@ func Run(config AppConfig, args []string) error {
 					if subCmd.Name == subCmdName {
 						// Parse flags and args for this subcommand
 						cmdArgs, cmdFlags := parseArgs(args[2:], subCmd.Flags)
-						
+
 						// Check required flags
 						for _, flag := range subCmd.Flags {
 							if flag.Required {
@@ -102,11 +102,11 @@ func Run(config AppConfig, args []string) error {
 								}
 							}
 						}
-						
+
 						return subCmd.Run(ctx, cmdArgs, cmdFlags)
 					}
 				}
-				
+
 				// Subcommand not found
 				fmt.Printf("Unknown subcommand: %s for command %s\n", subCmdName, cmdName)
 				printCommandHelp(cmd)
@@ -114,7 +114,7 @@ func Run(config AppConfig, args []string) error {
 			} else {
 				// Parse flags and args for this command
 				cmdArgs, cmdFlags := parseArgs(args[1:], cmd.Flags)
-				
+
 				// Check required flags
 				for _, flag := range cmd.Flags {
 					if flag.Required {
@@ -129,7 +129,7 @@ func Run(config AppConfig, args []string) error {
 						}
 					}
 				}
-				
+
 				return cmd.Run(ctx, cmdArgs, cmdFlags)
 			}
 		}
@@ -145,11 +145,11 @@ func Run(config AppConfig, args []string) error {
 func parseArgs(args []string, flags []Flag) ([]string, map[string]string) {
 	cmdArgs := []string{}
 	cmdFlags := make(map[string]string)
-	
+
 	i := 0
 	for i < len(args) {
 		arg := args[i]
-		
+
 		if strings.HasPrefix(arg, "--") {
 			flagName := arg[2:]
 			// Check if this is a known flag
@@ -160,7 +160,7 @@ func parseArgs(args []string, flags []Flag) ([]string, map[string]string) {
 					break
 				}
 			}
-			
+
 			if isKnownFlag {
 				// Check if next argument is a value for this flag
 				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") && !strings.HasPrefix(args[i+1], "-") {
@@ -187,7 +187,7 @@ func parseArgs(args []string, flags []Flag) ([]string, map[string]string) {
 					break
 				}
 			}
-			
+
 			if isKnownFlag {
 				// Check if next argument is a value for this flag
 				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") && !strings.HasPrefix(args[i+1], "-") {
@@ -209,7 +209,7 @@ func parseArgs(args []string, flags []Flag) ([]string, map[string]string) {
 			i++
 		}
 	}
-	
+
 	return cmdArgs, cmdFlags
 }
 
@@ -217,12 +217,12 @@ func parseArgs(args []string, flags []Flag) ([]string, map[string]string) {
 func printHelp(config AppConfig) {
 	fmt.Printf("%s - %s\n\n", config.Name, config.Description)
 	fmt.Printf("Version: %s\n\n", config.Version)
-	
+
 	if len(config.Commands) > 0 {
 		fmt.Println("Available commands:")
 		for _, cmd := range config.Commands {
 			fmt.Printf("  %s - %s\n", cmd.Name, cmd.Short)
-			
+
 			// Print flags for this command if it doesn't have subcommands
 			if len(cmd.SubCommands) == 0 && len(cmd.Flags) > 0 {
 				fmt.Printf("    Flags:\n")
@@ -234,13 +234,13 @@ func printHelp(config AppConfig) {
 					}
 				}
 			}
-			
+
 			// Print subcommands if they exist
 			if len(cmd.SubCommands) > 0 {
 				fmt.Printf("    Subcommands:\n")
 				for _, subCmd := range cmd.SubCommands {
 					fmt.Printf("      %s - %s\n", subCmd.Name, subCmd.Short)
-					
+
 					// Print flags for subcommand
 					if len(subCmd.Flags) > 0 {
 						fmt.Printf("        Flags:\n")
@@ -265,7 +265,7 @@ func printCommandHelp(cmd Command) {
 	if cmd.Long != "" {
 		fmt.Printf("\n%s\n", cmd.Long)
 	}
-	
+
 	// Print flags for this command if it doesn't have subcommands
 	if len(cmd.SubCommands) == 0 && len(cmd.Flags) > 0 {
 		fmt.Printf("\nFlags:\n")
@@ -277,13 +277,13 @@ func printCommandHelp(cmd Command) {
 			}
 		}
 	}
-	
+
 	// Print subcommands if they exist
 	if len(cmd.SubCommands) > 0 {
 		fmt.Printf("\nSubcommands:\n")
 		for _, subCmd := range cmd.SubCommands {
 			fmt.Printf("  %s - %s\n", subCmd.Name, subCmd.Short)
-			
+
 			// Print flags for subcommand
 			if len(subCmd.Flags) > 0 {
 				fmt.Printf("    Flags:\n")

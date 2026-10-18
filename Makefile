@@ -1,0 +1,9 @@
+.PHONY: lint test
+
+# golangci-lint has no vulnerability linter, so lint runs govulncheck right after it.
+lint:
+	golangci-lint run ./...
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+test:
+	go test -race ./...

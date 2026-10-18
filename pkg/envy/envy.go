@@ -1,3 +1,4 @@
+// Package envy loads environment variables, and an optional .env file, into a tagged struct.
 package envy
 
 import (
@@ -22,7 +23,7 @@ func Load(target any) error {
 
 func parse(v any) error {
 	ptrVal := reflect.ValueOf(v)
-	if ptrVal.Kind() != reflect.Ptr || ptrVal.Elem().Kind() != reflect.Struct {
+	if ptrVal.Kind() != reflect.Pointer || ptrVal.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("target must be a pointer to a struct")
 	}
 

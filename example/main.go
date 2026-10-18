@@ -61,16 +61,8 @@ func main() {
 					},
 				},
 				Run: func(ctx context.Context, args []string, flags map[string]string) error {
-					http := flags["http"]
-					grpc := flags["grpc"]
-					consumer := flags["consumer"]
-
-					fmt.Printf("Starting server...\n")
-					fmt.Printf("HTTP: %s\n", http)
-					fmt.Printf("gRPC: %s\n", grpc)
-					fmt.Printf("Consumer: %s\n", consumer)
-
-					return nil
+					fmt.Printf("gRPC: %s, Consumer: %s\n", flags["grpc"], flags["consumer"])
+					return serve(ctx, cfg.App.Port)
 				},
 			},
 			{

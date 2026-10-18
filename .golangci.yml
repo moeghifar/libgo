@@ -1,0 +1,19 @@
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - gosec # security: weak crypto, unsafe, integer overflow, file perms
+  settings:
+    staticcheck:
+      checks: ["all"] # staticcheck + gosimple + stylecheck, every check
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec]
+        text: "G101" # fixture DSNs in tests are not credentials
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -23,11 +23,10 @@ type Config struct {
 
 func TestLoad_NoEnvFile(t *testing.T) {
 	// Ensure no .env file exists
-	os.Remove(".env")
+	_ = os.Remove(".env")
 
 	// Set required env var manually to avoid error
-	os.Setenv("API_KEY", "secret")
-	defer os.Unsetenv("API_KEY")
+	t.Setenv("API_KEY", "secret")
 
 	cfg := Config{}
 	err := Load(&cfg)
@@ -52,11 +51,11 @@ ALLOWED_HOSTS=example.com, api.example.com
 RETRY_BACKOFF=10, 20, 30
 TEMPERATURES=23.5, 98.6, 100.0`
 
-	err := os.WriteFile(".env", []byte(envContent), 0644)
+	err := os.WriteFile(".env", []byte(envContent), 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(".env")
+	defer func() { _ = os.Remove(".env") }()
 
 	cfg := Config{}
 	err = Load(&cfg)
@@ -95,8 +94,8 @@ TEMPERATURES=23.5, 98.6, 100.0`
 }
 
 func TestLoad_RequiredMissing(t *testing.T) {
-	os.Remove(".env")
-	os.Unsetenv("API_KEY")
+	_ = os.Remove(".env")
+	_ = os.Unsetenv("API_KEY")
 
 	cfg := Config{}
 	err := Load(&cfg)

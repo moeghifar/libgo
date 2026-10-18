@@ -140,4 +140,4 @@ wp.OnPanic = func(ctx context.Context, p *foreverwork.PanicError) {
 
 ## License
 
-MIT
+Apache 2.0, see [LICENSE](../../LICENSE)

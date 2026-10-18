@@ -126,7 +126,7 @@ func TestRequestIDInput(t *testing.T) {
 func TestRunGracefulShutdown(t *testing.T) {
 	api := New(Config{Listen: fiber.ListenConfig{DisableStartupMessage: true}})
 	closed := make(chan struct{})
-	var once sync.Once // Fiber v3.3.0 runs OnPostShutdown twice on a graceful stop
+	var once sync.Once // Fiber v3.3.0 ran OnPostShutdown twice on a graceful stop
 	api.App().Hooks().OnPostShutdown(func(error) error { once.Do(func() { close(closed) }); return nil })
 
 	l, _ := net.Listen("tcp", "127.0.0.1:0")

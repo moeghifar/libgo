@@ -104,7 +104,7 @@ Cleanup on shutdown uses Fiber's hooks:
 api.App().Hooks().OnPostShutdown(func(err error) error { return db.Close() })
 ```
 
-Fiber v3.3.0 can call `OnPostShutdown` twice on a graceful stop, so make cleanup idempotent (`sync.Once`).
+Fiber v3 can call `OnPostShutdown` twice (seen on v3.3.0) on a graceful stop, so make cleanup idempotent (`sync.Once`).
 
 ## Errors (JSON:API)
 
@@ -149,4 +149,4 @@ No validation, no request binding, no security schemes. Use Fiber's `c.Bind()`. 
 
 ## License
 
-MIT
+Apache 2.0, see [LICENSE](../../LICENSE)

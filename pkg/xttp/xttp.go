@@ -21,6 +21,7 @@ package xttp
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -65,19 +66,23 @@ type Route struct {
 // API registers routes on a Fiber router and collects their description.
 // Group returns an API that shares the same document.
 type API struct {
-	app    *fiber.App
-	listen fiber.ListenConfig
-	router fiber.Router
-	prefix string
-	doc    *document
+	app     *fiber.App
+	listen  fiber.ListenConfig
+	router  fiber.Router
+	prefix  string
+	doc     *document
+	log     *slog.Logger
+	headers *headerSet
 }
 
 type document struct {
-	mu      sync.Mutex
-	info    Info
-	paths   map[string]any
-	schemas map[string]any
-	names   map[reflect.Type]string
+	mu            sync.Mutex
+	info          Info
+	paths         map[string]any
+	schemas       map[string]any
+	names         map[reflect.Type]string
+	defaultErrors []int
+	mounted       map[string]bool // docs paths already served
 }
 
 // Group returns an API whose routes are mounted under prefix, both in Fiber
@@ -93,14 +98,16 @@ func (a *API) Group(prefix string, middlewares ...fiber.Handler) *API {
 	} else {
 		g = a.router.Group(prefix)
 	}
-	return &API{app: a.app, listen: a.listen, router: g, prefix: a.prefix + prefix, doc: a.doc}
+	return &API{app: a.app, listen: a.listen, router: g, prefix: a.prefix + prefix, doc: a.doc, log: a.log, headers: a.headers}
 }
 
 // Add registers routes with Fiber and in the document. It panics on a route
-// with no Method, Path or Handler: that is a programmer error caught at startup.
+// with no Method or Handler, or with no Path outside a group: that is a
+// programmer error caught at startup. On a group, an empty Path is the group
+// prefix itself.
 func (a *API) Add(routes ...Route) {
 	for _, r := range routes {
-		if r.Method == "" || r.Path == "" || r.Handler == nil {
+		if r.Method == "" || r.Path == "" && a.prefix == "" || r.Handler == nil {
 			panic("xttp: route needs Method, Path and Handler: " + r.Method + " " + r.Path)
 		}
 		// Fiber runs the chain in argument order, so middlewares go first.
@@ -142,21 +149,40 @@ func (a *API) JSON() []byte {
 // Docs serves the document and a browsable reference under path:
 // path (Scalar viewer), path+"/openapi.yaml" and path+"/openapi.json".
 // The document is rendered on the first request, so add routes before serving.
-func (a *API) Docs(path string) {
+// Config.Docs does the same with a guard and without the page; mounting the
+// same path twice panics.
+func (a *API) Docs(path string) { a.docs(path, true, nil) }
+
+func (a *API) docs(path string, page bool, guard []fiber.Handler) {
+	a.doc.mu.Lock()
+	dup := a.doc.mounted[a.prefix+path]
+	a.doc.mounted[a.prefix+path] = true
+	a.doc.mu.Unlock()
+	if dup {
+		panic("xttp: docs already mounted at " + a.prefix + path)
+	}
+	get := func(p string, h fiber.Handler) {
+		chain := append(handlers(guard), h)
+		a.router.Get(p, chain[0], chain[1:]...)
+	}
 	yamlDoc := sync.OnceValue(a.YAML)
 	jsonDoc := sync.OnceValue(a.JSON)
-	page := docsPage(a.doc.info.Title, a.prefix+path+"/openapi.json")
-	a.router.Get(path+"/openapi.yaml", func(c fiber.Ctx) error {
+	get(path+"/openapi.yaml", func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderContentType, "application/yaml")
 		return c.Send(yamlDoc())
 	})
-	a.router.Get(path+"/openapi.json", func(c fiber.Ctx) error {
+	get(path+"/openapi.json", func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
 		return c.Send(jsonDoc())
 	})
-	a.router.Get(path, func(c fiber.Ctx) error {
+	if !page {
+		return
+	}
+	html := docsPage(a.doc.info.Title, a.prefix+path+"/openapi.json")
+	get(path, func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
-		return c.SendString(page)
+		c.Set(fiber.HeaderContentSecurityPolicy, docsCSP) // per route: the preset's CSP would block Scalar
+		return c.SendString(html)
 	})
 }
 
@@ -197,11 +223,12 @@ func (d *document) add(prefix string, r Route) {
 
 	responses := map[string]any{}
 	for code, body := range r.Responses {
-		resp := map[string]any{"description": http.StatusText(code)}
-		if body != nil {
-			resp["content"] = jsonContent(d.schema(reflect.TypeOf(body)))
+		responses[strconv.Itoa(code)] = d.response(code, body)
+	}
+	for _, code := range d.defaultErrors {
+		if _, set := r.Responses[code]; !set {
+			responses[strconv.Itoa(code)] = d.response(code, nil)
 		}
-		responses[strconv.Itoa(code)] = resp
 	}
 	if len(responses) == 0 {
 		responses["default"] = map[string]any{"description": "Response"}
@@ -214,6 +241,20 @@ func (d *document) add(prefix string, r Route) {
 		d.paths[path] = item
 	}
 	item[strings.ToLower(r.Method)] = op
+}
+
+// response documents one status. An error status (>= 400) with no body, or
+// with ErrorDocument{}, is the JSON:API document ErrorHandler sends.
+func (d *document) response(code int, body any) map[string]any {
+	resp := map[string]any{"description": http.StatusText(code)}
+	_, isDoc := body.(ErrorDocument)
+	switch {
+	case code >= 400 && (body == nil || isDoc):
+		resp["content"] = map[string]any{MIMEJSONAPI: map[string]any{"schema": d.schema(reflect.TypeFor[ErrorDocument]())}}
+	case body != nil:
+		resp["content"] = jsonContent(d.schema(reflect.TypeOf(body)))
+	}
+	return resp
 }
 
 func (d *document) queryParams(t reflect.Type) []any {
@@ -306,8 +347,8 @@ func (d *document) object(t reflect.Type) map[string]any {
 }
 
 // fields follows encoding/json: unexported fields and `json:"-"` are skipped,
-// untagged embedded structs are flattened, and a field without omitempty or
-// omitzero is required.
+// untagged embedded structs are flattened. A field is required unless it has
+// omitempty or omitzero; an explicit `required:"true"` or `required:"false"` tag wins.
 func (d *document) fields(t reflect.Type, props map[string]any, required *[]any) {
 	for i := range t.NumField() {
 		f := t.Field(i)
@@ -341,7 +382,11 @@ func (d *document) fields(t reflect.Type, props map[string]any, required *[]any)
 			}
 		}
 		props[name] = s
-		if !strings.Contains(opts, "omitempty") && !strings.Contains(opts, "omitzero") {
+		req := !strings.Contains(opts, "omitempty") && !strings.Contains(opts, "omitzero")
+		if tag := f.Tag.Get("required"); tag != "" {
+			req = tag == "true"
+		}
+		if req {
 			*required = append(*required, name)
 		}
 	}
@@ -360,6 +405,14 @@ func toAny(ss []string) []any {
 }
 
 const scalarJS = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.122/dist/browser/standalone.min.js"
+
+// docsCSP allows exactly the Scalar script, the spec on this origin, and the
+// inline styles and data: images Scalar injects. No inline script. The CDN
+// answers with Cross-Origin-Resource-Policy: cross-origin, so helmet's
+// Cross-Origin-Embedder-Policy: require-corp needs no relaxation.
+const docsCSP = "default-src 'none'; script-src " + scalarJS + "; connect-src 'self'; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
+	"img-src 'self' data: https:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 
 func docsPage(title, specURL string) string {
 	return `<!doctype html>

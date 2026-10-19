@@ -103,3 +103,15 @@ func TestLoad_RequiredMissing(t *testing.T) {
 		t.Fatal("expected error due to missing required field, got nil")
 	}
 }
+
+func TestDefaults(t *testing.T) {
+	t.Setenv("APP_PORT", "1")
+	t.Setenv("API_KEY", "set")
+	var cfg Config
+	if err := Defaults(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AppPort != 8080 || cfg.APIKey != "" || !reflect.DeepEqual(cfg.RetryBackoff, []int{1, 2, 4}) {
+		t.Errorf("Defaults read the environment or skipped a tag: %+v", cfg)
+	}
+}

@@ -3,25 +3,32 @@ package envy
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 )
 
-// Load loads environment variables from a .env file (if available)
-// and populates the target struct fields based on tags.
+// Load fills target from `default:` tags, then the .env file (if available)
+// and the environment. A `required:"true"` field left empty is an error.
 func Load(target any) error {
-	// 1. Load .env file (optional, based on build tags)
+	if err := Defaults(target); err != nil {
+		return err
+	}
 	if err := loadEnvFile(); err != nil {
 		return err
 	}
-
-	// 2. Parse struct tags and populate fields
-	return parse(target)
+	return parse(target, os.Getenv)
 }
 
-func parse(v any) error {
+// Defaults applies only the `default:` tags, reading neither the environment
+// nor a .env file, and ignores `required`.
+func Defaults(target any) error { return parse(target, nil) }
+
+// parse fills v from getenv, falling back to the default tag. A nil getenv
+// applies defaults only.
+func parse(v any, getenv func(string) string) error {
 	ptrVal := reflect.ValueOf(v)
 	if ptrVal.Kind() != reflect.Pointer || ptrVal.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("target must be a pointer to a struct")
@@ -36,7 +43,7 @@ func parse(v any) error {
 
 		// Handle nested structs (recursive)
 		if field.Kind() == reflect.Struct {
-			if err := parse(field.Addr().Interface()); err != nil {
+			if err := parse(field.Addr().Interface(), getenv); err != nil {
 				return err
 			}
 			continue
@@ -51,19 +58,21 @@ func parse(v any) error {
 			continue // Skip fields without env tag
 		}
 
-		// Get value from environment
-		envVal := os.Getenv(envKey)
+		var envVal string
+		if getenv != nil {
+			envVal = getenv(envKey)
+		}
 
 		// Use default if empty
 		if envVal == "" {
-			if required == "true" && defaultValue != "" {
-				fmt.Printf("WARNING: required env var %s not set, using default value: %s\n", envKey, defaultValue)
+			if getenv != nil && required == "true" && defaultValue != "" {
+				slog.Default().Warn("required env var not set, using default", "var", envKey, "default", defaultValue)
 			}
 			envVal = defaultValue
 		}
 
 		// Check required
-		if envVal == "" && required == "true" {
+		if getenv != nil && envVal == "" && required == "true" {
 			return fmt.Errorf("var `%s` is required", envKey)
 		}
 

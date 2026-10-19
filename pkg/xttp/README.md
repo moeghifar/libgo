@@ -15,7 +15,9 @@ It looks like Huma from the outside, one struct per operation with OpenAPI gener
 - **Parameters**: Fiber `:id` / `:id?` become `{id}` path params; a `Query` struct's `query:"name"` fields become query params
 - **Groups**: `api.Group("/v1", mw...)` prefixes both the Fiber routes and the document paths
 - **Per-route middlewares**: `Route.Middlewares` run before the handler
-- **YAML and JSON**: `api.YAML()` / `api.JSON()`, plus `api.Docs("/docs")` serving a Scalar page, `/docs/openapi.yaml` and `/docs/openapi.json`
+- **YAML and JSON**: `api.YAML()` / `api.JSON()`, plus `Docs{Enabled: true}` (or `api.Docs("/docs")`) serving a Scalar page, `/docs/openapi.yaml` and `/docs/openapi.json`
+- **Security headers always on**: helmet set, `Cache-Control: no-store`, no `Server` banner, also on 413/431 responses; `HelmetStrict` preset for pure APIs; see [Security defaults](#security-defaults)
+- **JSON:API errors documented**: `xttp.ErrorDocument` is the wire type and the schema; `DefaultErrors` adds it to every route
 - **Startup-only reflection**: schemas are built when a route is added, so a request pays nothing
 - **No YAML dependency**: a small stdlib emitter writes the document
 
@@ -71,9 +73,10 @@ v1.Add(
 	},
 )
 
-api.Docs("/docs") // add routes first: the document renders on the first request
 api.Run(context.Background(), ":3000") // graceful stop on SIGINT/SIGTERM
 ```
+
+Docs are opt-in: `Config{Docs: xttp.DocsConfig{Enabled: true}}` serves `/docs`, `/docs/openapi.yaml` and `/docs/openapi.json` (rendered on the first request, so route order does not matter); `api.Docs("/docs")` still works for manual mounting.
 
 Export the spec without a server, for CI or a committed file:
 
@@ -93,10 +96,45 @@ os.WriteFile("openapi.yaml", api.YAML(), 0o644)
 | CORS | off | `CORS: &cors.Config{AllowOrigins: ...}` |
 | Probes | `GET /livez`, `/readyz`, `/startupz` → 200 / 503 | `Health{Live, Ready, Startup func(fiber.Ctx) bool}` |
 | Request ID | `X-Request-ID`; incoming kept only if ≤ 72 chars (two UUIDs) of `[A-Za-z0-9._-]`, else generated | — |
-| Errors / 404 | always `xttp.ErrorHandler` (JSON:API); unknown route → `HTTP-404` | — |
+| Errors / 404 | always `(*API).ErrorHandler` (JSON:API); unknown route → `HTTP-404` | — |
+| Helmet | always on: `helmet.ConfigDefault` + `Cache-Control: no-store`, no `Server` header | `HelmetPreset: xttp.HelmetStrict`; `Helmet: helmet.Config{...}` overrides one field, `"-"` removes a header; `Helmet.Next` skips a request |
+| Headers | `Cache-Control: no-store` on every response, probes and 413/431 included | `Headers: map[string]string{"X-Robots-Tag": "noindex", "Cache-Control": "-"}` |
+| HideServerHeader | true: no `Server` banner, also before routing | `HideServerHeader: &f` keeps `Fiber.ServerHeader` |
+| Docs | off | `Docs: DocsConfig{Enabled: true, Path: "/docs", Page: &f, Guard: []fiber.Handler{...}}`; `Page: false` serves only the spec files (no CDN script) |
+| Profiling | off | `Profiling: ProfilingConfig{Enabled: true, Guard: ...}`; a Guard is required (`New` panics without one) unless `AllowUnguarded` |
+| Logger | `slog.Default()` | `Logger: *slog.Logger`, used by the access log and error handler |
+| AccessLog | on, one line per request | `AccessLog: &f`; errors ≥ 500 are still logged |
+| RateLimitHeaders | off: no `X-RateLimit-*` | `RateLimitHeaders: &t` |
+| StrictContentType | off | `true`: a body whose media type is not `application/json` → 415 before any handler; bodiless requests pass |
+| DefaultErrors | none | `DefaultErrors: []int{400, 404, 500}` documents `ErrorDocument` on every route that does not set the status |
+| Listener | `tcp` (IPv4 + IPv6) | `Listen.ListenerNetwork: fiber.NetworkTCP4` |
 | Shutdown | `Run` stops on ctx done, SIGINT or SIGTERM; `/readyz` → 503; waits 10s for in-flight requests | `Listen.ShutdownTimeout`; TLS via `Listen.CertFile`… |
 
-Middleware order: probes (not logged, not limited) → request id → slog access log → recover → helmet → CORS → rate limit → your routes.
+Middleware order: probes (not logged, not limited) → request id → slog access log → recover → security headers → CORS → pprof → rate limit → content-type check → docs → your routes.
+
+Middleware can read the status of a returned error with `xttp.StatusOf(err)`: the error handler sets the response status only after the chain returned.
+
+## Security defaults
+
+Always on, with no field to switch them off:
+
+- Fiber helmet headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options`, `Referrer-Policy: no-referrer`, COEP/COOP/CORP, ...) and `Cache-Control: no-store` on every response, including probes and the 413/431 responses fasthttp writes before routing
+- no `Server` banner, no `X-Powered-By`
+- JSON:API error bodies with no internal text; a 500's cause is logged, never sent
+- request ids sanitised (≤ 72 chars of `[A-Za-z0-9._-]`), hostile values replaced
+- body limit, read/write/idle timeouts and the per-IP rate limit (no `X-RateLimit-*` headers)
+- docs and pprof off; pprof needs a guard
+
+Header resolution, in order: preset → `Config.Helmet` field overrides → `"-"` removals → `Config.Headers`.
+
+| Preset | CSP | X-Frame-Options | Permissions-Policy | CORP | HSTS (TLS only) |
+| --- | --- | --- | --- | --- | --- |
+| `HelmetDefault` | none | `SAMEORIGIN` | none | `same-origin` | none |
+| `HelmetStrict` | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` | `DENY` | every feature `()` | `same-origin` | `max-age=63072000; includeSubDomains; preload` |
+
+The docs page sets its own `Content-Security-Policy` (exactly the Scalar script URL, inline styles, `connect-src 'self'`), so it renders under `HelmetStrict`. The CDN sends `Cross-Origin-Resource-Policy: cross-origin`, so helmet's `Cross-Origin-Embedder-Policy: require-corp` needs no relaxation (verified 2026-10-19 with `curl -sI`). Use `Page: false` in production.
+
+[`example/strict`](../../example/strict) is the reference strict server; `.specify/research/008-vapt-strict.sh` runs the VAPT checklist against it.
 
 Cleanup on shutdown uses Fiber's hooks:
 
@@ -132,7 +170,9 @@ func getUser(c fiber.Ctx) error {
 - `xttp.Errors{...}` sends several at once (validation); status is the shared one, else 400 for all-4xx, else 500
 - `Source{Pointer|Parameter|Header}` and `Meta` as in the spec
 - Fiber errors (unknown route 404, 405, 413) keep their status; any other error is a 500 with no internal text in the body, logged with slog
-- Safe without middlewares: requests fasthttp rejects before routing still get a valid document
+- Safe without middlewares: requests fasthttp rejects before routing still get a valid document, with the security headers
+- `xttp.ErrorDocument{Errors []ErrorObject}` is the wire type; a `Responses` entry ≥ 400 with `nil` or `ErrorDocument{}` is documented as `application/vnd.api+json` with that schema, and `Config.DefaultErrors` adds it to every route
+- `xttp.StatusOf(err)` returns the status the handler will send (0 for nil), for audit or metrics middleware
 
 ## Struct tags
 
@@ -141,7 +181,7 @@ func getUser(c fiber.Ctx) error {
 | `json`     | body/response | property name, `-`, `omitempty`, `omitzero` |
 | `doc`      | any field    | description                                   |
 | `query`    | `Query` struct | query parameter name (same tag Fiber binds) |
-| `required` | `Query` struct | `"true"` marks the parameter required       |
+| `required` | any field    | `"true"` / `"false"` overrides the default (query: optional; body: required unless `omitempty`/`omitzero`) |
 
 ## What it does not do
 

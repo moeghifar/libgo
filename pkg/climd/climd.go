@@ -43,12 +43,16 @@ type AppConfig struct {
 	Version     string
 	Description string
 	Commands    []Command
+	Default     string // command run when no arguments are given; empty prints help
 }
 
 // Run executes the application with the given arguments
 func Run(config AppConfig, args []string) error {
 	if len(args) == 0 {
 		args = os.Args[1:]
+	}
+	if len(args) == 0 && config.Default != "" {
+		args = []string{config.Default}
 	}
 
 	ctx := context.Background()

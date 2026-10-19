@@ -88,3 +88,47 @@ func TestErrorWithCopies(t *testing.T) {
 		t.Fatal("With mutated the shared value")
 	}
 }
+
+func TestStatusOf(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"nil", nil, 0},
+		{"error", &Error{Status: 404}, 404},
+		{"errors shared", Errors{{Status: 422}, {Status: 422}}, 422},
+		{"errors all 4xx", Errors{{Status: 422}, {Status: 409}}, 400},
+		{"errors mixed", Errors{{Status: 422}, {Status: 503}}, 500},
+		{"fiber 404", fiber.ErrNotFound, 404},
+		{"fiber 413", fiber.ErrRequestEntityTooLarge, 413},
+		{"plain", errors.New("x"), 500},
+		{"wrapped", fmt.Errorf("w: %w", &Error{Status: 418}), 418},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StatusOf(tt.err); got != tt.want {
+				t.Errorf("StatusOf = %d, want %d", got, tt.want)
+			}
+			if tt.err == nil {
+				return
+			}
+			api := New(Config{})
+			api.Add(Route{Method: "GET", Path: "/x", Handler: func(fiber.Ctx) error { return tt.err }})
+			resp, _ := do(t, api.App(), httptest.NewRequest("GET", "/x", nil))
+			if resp.StatusCode != tt.want {
+				t.Errorf("ErrorHandler sent %d, want %d", resp.StatusCode, tt.want)
+			}
+		})
+	}
+}
+
+func TestErrorDocumentWire(t *testing.T) {
+	api := New(Config{})
+	api.Add(Route{Method: "GET", Path: "/x", Handler: func(fiber.Ctx) error { return errUserNotFound.With("d", nil) }})
+	_, body := do(t, api.App(), httptest.NewRequest("GET", "/x", nil))
+	var doc ErrorDocument
+	if err := json.Unmarshal([]byte(body), &doc); err != nil || len(doc.Errors) != 1 || doc.Errors[0].Status != "404" || doc.Errors[0].Code != "USR-404" {
+		t.Fatalf("%v %s", err, body)
+	}
+}

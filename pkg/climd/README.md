@@ -9,6 +9,7 @@
 - Support for subcommands: `./cmd <command> <subcommand> [flags]`
 - Context-aware execution
 - Built-in help and version flags
+- Default command: `AppConfig{Default: "serve"}` runs `serve` when no arguments are given (otherwise help is printed)
 - Minimal dependencies
 - Small binary footprint
 

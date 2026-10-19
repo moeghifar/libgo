@@ -5,6 +5,7 @@ go 1.27.2
 require (
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/joho/godotenv v1.5.1
+	github.com/valyala/fasthttp v1.72.0
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.72.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

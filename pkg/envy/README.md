@@ -56,6 +56,10 @@ func main() {
 
 ```
 
+### Defaults only
+
+`envy.Defaults(&cfg)` applies the `default` tags and nothing else: no `.env`, no environment, `required` ignored. `Load` runs it first, then `.env`, then the environment. A required field that falls back to its default is reported through `slog.Default().Warn`.
+
 ## Build Optimization
 
 By default, this package imports `github.com/joho/godotenv` to load `.env` files. This is great for development.

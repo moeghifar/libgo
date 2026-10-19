@@ -35,11 +35,10 @@ api.Add(xttp.Route{
 		return c.JSON(u)
 	},
 })
-api.Docs("/docs")
 api.Run(ctx, ":8080") // graceful stop on SIGINT/SIGTERM
 ```
 
-Out of the box: request ID, slog access log, panic recovery, helmet headers, 100 req/s rate limit per IP, 1 MiB body limit, read/write/idle timeouts, Kubernetes probes (`/livez`, `/readyz`, `/startupz`), JSON:API errors including 404, and optional CORS. See the [xttp README](pkg/xttp/README.md#server-defaults).
+Out of the box: request ID, slog access log, panic recovery, helmet headers and `Cache-Control: no-store` on every response (413/431 included), no `Server` banner, 100 req/s rate limit per IP, 1 MiB body limit, read/write/idle timeouts, dual-stack listener, Kubernetes probes (`/livez`, `/readyz`, `/startupz`), JSON:API errors including 404, and optional CORS, docs (`Docs{Enabled: true}`), pprof behind a guard, a `HelmetStrict` preset and strict `application/json` bodies. [`example/strict`](example/strict) is the hardened profile. See the [xttp README](pkg/xttp/README.md#server-defaults).
 
 ## Example
 

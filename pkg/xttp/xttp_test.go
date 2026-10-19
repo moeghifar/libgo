@@ -268,3 +268,55 @@ func TestDefaultMiddlewares(t *testing.T) {
 		t.Error("no helmet headers")
 	}
 }
+
+func TestErrorResponsesDocumented(t *testing.T) {
+	api := New(Config{DefaultErrors: []int{400}})
+	api.Add(
+		Route{Method: "GET", Path: "/a", Responses: map[int]any{200: User{}, 404: nil}, Handler: func(fiber.Ctx) error { return nil }},
+		Route{Method: "GET", Path: "/b", Responses: map[int]any{400: APIError{}}, Handler: func(fiber.Ctx) error { return nil }},
+	)
+	spec := api.Spec()
+	ref := "#/components/schemas/ErrorDocument"
+	if got := get(t, spec, "paths", "/a", "get", "responses", "404", "content", MIMEJSONAPI, "schema", "$ref"); got != ref {
+		t.Errorf("404 = %v", got)
+	}
+	if got := get(t, spec, "paths", "/a", "get", "responses", "400", "content", MIMEJSONAPI, "schema", "$ref"); got != ref {
+		t.Errorf("default 400 = %v", got)
+	}
+	if got := get(t, spec, "paths", "/b", "get", "responses", "400", "content", "application/json", "schema", "$ref"); got != "#/components/schemas/APIError" {
+		t.Errorf("route-set 400 = %v", got)
+	}
+	if got := get(t, spec, "components", "schemas", "ErrorDocument", "required"); !reflect.DeepEqual(got, []any{"errors"}) {
+		t.Errorf("ErrorDocument required = %v", got)
+	}
+}
+
+func TestRequiredTag(t *testing.T) {
+	type Body struct {
+		A string
+		B string `required:"false"`
+		C string `json:",omitempty" required:"true"`
+	}
+	_, api := newAPI()
+	api.Add(Route{Method: "POST", Path: "/x", Body: Body{}, Handler: func(fiber.Ctx) error { return nil }})
+	if got := get(t, api.Spec(), "components", "schemas", "Body", "required"); !reflect.DeepEqual(got, []any{"A", "C"}) {
+		t.Fatalf("required = %v", got)
+	}
+}
+
+func TestGroupRoot(t *testing.T) {
+	app, api := newAPI()
+	api.Group("/v1/keys").Add(Route{Method: "GET", Path: "", Handler: func(c fiber.Ctx) error { return c.SendStatus(200) }})
+	if resp, err := app.Test(httptest.NewRequest("GET", "/v1/keys", nil)); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("%v %v", resp, err)
+	}
+	if get(t, api.Spec(), "paths", "/v1/keys", "get") == nil {
+		t.Fatal("spec has no /v1/keys")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic on root API")
+		}
+	}()
+	api.Add(Route{Method: "GET", Path: "", Handler: func(fiber.Ctx) error { return nil }})
+}

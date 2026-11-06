@@ -1,0 +1,8 @@
+# Allowlist: secrets and local files never reach the build context.
+*
+!go.mod
+!go.sum
+!pkg
+!example
+example/.env*
+example/strict

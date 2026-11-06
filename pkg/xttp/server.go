@@ -88,6 +88,22 @@ type Config struct {
 	// logged either way.
 	AccessLog *bool
 
+	// MapError turns an error a handler returned into one with a status,
+	// usually an *Error: the service's own errors.Is switch. It sees only
+	// errors that are not already *Error, Errors or *fiber.Error. Nil, or a
+	// panic in it, leaves the original error, which becomes a 500.
+	MapError func(error) error
+
+	// OnResponse runs after each routed request with the final status and the
+	// returned error, also after a recovered panic and whatever AccessLog
+	// says: audit logs and metrics go here. It runs before the error body is
+	// written, and a panic in it is logged and dropped.
+	OnResponse func(c fiber.Ctx, status int, err error)
+
+	// SecuritySchemes is components/securitySchemes of the document, by name,
+	// e.g. {"bearer": {"type": "http", "scheme": "bearer"}}.
+	SecuritySchemes map[string]any
+
 	// DefaultErrors are statuses documented on every route as ErrorDocument
 	// unless the route sets them, e.g. []int{400, 404, 500}.
 	DefaultErrors []int
@@ -138,8 +154,11 @@ func New(cfg Config) *API {
 		panic("xttp: Profiling.Enabled needs a Guard (or AllowUnguarded for local development)")
 	}
 	a := &API{
-		log:     cfg.Logger,
-		headers: newHeaderSet(helmetFor(cfg.HelmetPreset, cfg.Helmet), cfg.Headers),
+		log:        cfg.Logger,
+		mapError:   cfg.MapError,
+		onResponse: cfg.OnResponse,
+		accessLog:  on(cfg.AccessLog),
+		headers:    newHeaderSet(helmetFor(cfg.HelmetPreset, cfg.Helmet), cfg.Headers),
 		doc: &document{
 			info:          cfg.Info,
 			paths:         map[string]any{},
@@ -147,6 +166,7 @@ func New(cfg Config) *API {
 			names:         map[reflect.Type]string{},
 			defaultErrors: cfg.DefaultErrors,
 			mounted:       map[string]bool{},
+			schemes:       cfg.SecuritySchemes,
 		},
 	}
 	if a.log == nil {
@@ -175,8 +195,8 @@ func New(cfg Config) *API {
 	app.Get(healthcheck.StartupEndpoint, healthcheck.New(healthcheck.Config{Probe: cfg.Health.Startup}))
 
 	app.Use(dropBadRequestID, requestid.New())
-	if on(cfg.AccessLog) {
-		app.Use(a.accessLog)
+	if a.accessLog || a.onResponse != nil {
+		app.Use(a.observe)
 	}
 	app.Use(recoverer.New(), a.headers.middleware)
 	if cfg.CORS != nil {

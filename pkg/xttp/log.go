@@ -9,27 +9,36 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
-// accessLog writes one slog line per request after the handler ran, so the
-// status is the real one. It never logs bodies, headers or query strings.
-func (a *API) accessLog(c fiber.Ctx) error {
+// observe runs after the handler, so the status is the real one: it writes the
+// access log and calls Config.OnResponse. The log never holds bodies, headers
+// or query strings.
+func (a *API) observe(c fiber.Ctx) error {
 	start := time.Now()
-	err := c.Next()
+	err := a.mapped(c, c.Next())
 	status := c.Response().StatusCode()
 	if err != nil {
 		status = StatusOf(err) // the error handler sets the status only after middlewares return
 	}
-	level := slog.LevelInfo
-	if status >= fiber.StatusInternalServerError {
-		level = slog.LevelError
+	if a.accessLog {
+		level := slog.LevelInfo
+		if status >= fiber.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		a.log.Log(c.Context(), level, "http request",
+			"request_id", requestid.FromContext(c),
+			"method", c.Method(),
+			"path", c.Path(),
+			"status", status,
+			"latency", time.Since(start),
+			"ip", c.IP(),
+		)
 	}
-	a.log.Log(c.Context(), level, "http request",
-		"request_id", requestid.FromContext(c),
-		"method", c.Method(),
-		"path", c.Path(),
-		"status", status,
-		"latency", time.Since(start),
-		"ip", c.IP(),
-	)
+	if a.onResponse != nil {
+		func() {
+			defer a.contain(c, "OnResponse")
+			a.onResponse(c, status, err)
+		}()
+	}
 	return err
 }
 

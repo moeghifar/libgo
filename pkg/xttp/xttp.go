@@ -58,6 +58,9 @@ type Route struct {
 	// Responses maps a status code to its JSON body type. A nil value
 	// documents the status with no body.
 	Responses map[int]any
+	// Security names schemes from Config.SecuritySchemes for the document. It
+	// describes the route only: enforcing it is Middlewares' job.
+	Security []string
 
 	Handler     fiber.Handler
 	Middlewares []fiber.Handler // run before Handler, on this route only
@@ -73,6 +76,10 @@ type API struct {
 	doc     *document
 	log     *slog.Logger
 	headers *headerSet
+
+	mapError   func(error) error
+	onResponse func(fiber.Ctx, int, error)
+	accessLog  bool
 }
 
 type document struct {
@@ -83,6 +90,7 @@ type document struct {
 	names         map[reflect.Type]string
 	defaultErrors []int
 	mounted       map[string]bool // docs paths already served
+	schemes       map[string]any
 }
 
 // Group returns an API whose routes are mounted under prefix, both in Fiber
@@ -98,12 +106,12 @@ func (a *API) Group(prefix string, middlewares ...fiber.Handler) *API {
 	} else {
 		g = a.router.Group(prefix)
 	}
-	return &API{app: a.app, listen: a.listen, router: g, prefix: a.prefix + prefix, doc: a.doc, log: a.log, headers: a.headers}
+	return &API{app: a.app, listen: a.listen, router: g, prefix: a.prefix + prefix, doc: a.doc, log: a.log, headers: a.headers, mapError: a.mapError}
 }
 
 // Add registers routes with Fiber and in the document. It panics on a route
 // with no Method or Handler, or with no Path outside a group: that is a
-// programmer error caught at startup. On a group, an empty Path is the group
+// programmer error caught at startup, as is an undeclared Route.Security name. On a group, an empty Path is the group
 // prefix itself.
 func (a *API) Add(routes ...Route) {
 	for _, r := range routes {
@@ -111,9 +119,13 @@ func (a *API) Add(routes ...Route) {
 			panic("xttp: route needs Method, Path and Handler: " + r.Method + " " + r.Path)
 		}
 		// Fiber runs the chain in argument order, so middlewares go first.
-		chain := make([]any, 0, len(r.Middlewares)+1)
+		chain := make([]any, 0, len(r.Middlewares)+2)
 		for _, m := range r.Middlewares {
 			chain = append(chain, m)
+		}
+		// After Middlewares, so an unauthenticated caller learns nothing about the query.
+		if names := requiredQuery(r.Query); len(names) > 0 {
+			chain = append(chain, requireQuery(names))
 		}
 		chain = append(chain, r.Handler)
 		a.router.Add([]string{r.Method}, r.Path, chain[0], chain[1:]...)
@@ -131,8 +143,15 @@ func (a *API) Spec() map[string]any {
 		info["description"] = d.info.Description
 	}
 	spec := map[string]any{"openapi": "3.1.0", "info": info, "paths": d.paths}
+	components := map[string]any{}
 	if len(d.schemas) > 0 {
-		spec["components"] = map[string]any{"schemas": d.schemas}
+		components["schemas"] = d.schemas
+	}
+	if len(d.schemes) > 0 {
+		components["securitySchemes"] = d.schemes
+	}
+	if len(components) > 0 {
+		spec["components"] = components
 	}
 	return spec
 }
@@ -142,7 +161,7 @@ func (a *API) YAML() []byte { return marshalYAML(a.Spec()) }
 
 // JSON returns the document as indented JSON.
 func (a *API) JSON() []byte {
-	b, _ := json.MarshalIndent(a.Spec(), "", "  ") // plain maps of scalars: cannot fail
+	b, _ := json.MarshalIndent(a.Spec(), "", "  ") //nolint:errchkjson // plain maps of scalars: cannot fail
 	return b
 }
 
@@ -211,6 +230,16 @@ func (d *document) add(prefix string, r Route) {
 	set("operationId", r.OperationID, r.OperationID != "")
 	set("tags", toAny(r.Tags), len(r.Tags) > 0)
 	set("deprecated", true, r.Deprecated)
+	if len(r.Security) > 0 {
+		security := make([]any, len(r.Security))
+		for i, name := range r.Security {
+			if _, ok := d.schemes[name]; !ok {
+				panic("xttp: route uses undeclared security scheme: " + name)
+			}
+			security[i] = map[string]any{name: []any{}}
+		}
+		op["security"] = security
+	}
 
 	if r.Query != nil {
 		params = append(params, d.queryParams(reflect.TypeOf(r.Query))...)
@@ -255,6 +284,26 @@ func (d *document) response(code int, body any) map[string]any {
 		resp["content"] = jsonContent(d.schema(reflect.TypeOf(body)))
 	}
 	return resp
+}
+
+// requiredQuery lists the `required:"true"` parameters of a Route.Query.
+func requiredQuery(query any) []string {
+	if query == nil {
+		return nil
+	}
+	t := reflect.TypeOf(query)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var names []string
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("query"), ",")
+		if name != "" && name != "-" && f.Tag.Get("required") == "true" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (d *document) queryParams(t reflect.Type) []any {

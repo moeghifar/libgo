@@ -121,8 +121,46 @@ func ErrorHandler(c fiber.Ctx, err error) error {
 // resolved security headers (so 413/431 responses carry them) and Config.Logger.
 func (a *API) ErrorHandler(c fiber.Ctx, err error) error {
 	a.headers.set(c)
-	return renderError(c, err, a.log)
+	return renderError(c, a.mapped(c, err), a.log)
 }
+
+// mapped applies Config.MapError to an error nothing has classified yet.
+func (a *API) mapped(c fiber.Ctx, err error) (out error) {
+	out = err
+	var (
+		e  *Error
+		es Errors
+		fe *fiber.Error
+	)
+	if a.mapError == nil || err == nil || errors.As(err, &e) || errors.As(err, &es) || errors.As(err, &fe) {
+		return out
+	}
+	defer a.contain(c, "MapError")
+	if m := a.mapError(err); m != nil {
+		out = m
+	}
+	return out
+}
+
+// contain logs and drops a panic from a user hook: these run outside the
+// recover middleware, where a panic would take the process down.
+func (a *API) contain(c fiber.Ctx, hook string) {
+	if r := recover(); r != nil {
+		a.log.ErrorContext(c.Context(), "xttp: hook panicked", "hook", hook, "panic", r)
+	}
+}
+
+// CodeOf returns the Code of the first *Error in err's chain, or "".
+func CodeOf(err error) string {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Code
+	}
+	return ""
+}
+
+// IsCode reports whether CodeOf(err) is code.
+func IsCode(err error, code string) bool { return CodeOf(err) == code }
 
 func renderError(c fiber.Ctx, err error, log *slog.Logger) error {
 	list := toErrors(err)

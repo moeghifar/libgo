@@ -67,7 +67,7 @@ func (w *Worker[T]) fields(job T, runnerID int) []any {
 	if w.Describe != nil {
 		return append(f, w.Describe(job)...)
 	}
-	return append(f, "job", job)
+	return f // payloads hold personal data and secrets: logging one is opt-in
 }
 
 // work is one goroutine: take a job, run it, repeat until told to stop.

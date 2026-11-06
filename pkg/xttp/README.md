@@ -174,6 +174,14 @@ func getUser(c fiber.Ctx) error {
 - `xttp.ErrorDocument{Errors []ErrorObject}` is the wire type; a `Responses` entry ≥ 400 with `nil` or `ErrorDocument{}` is documented as `application/vnd.api+json` with that schema, and `Config.DefaultErrors` adds it to every route
 - `xttp.StatusOf(err)` returns the status the handler will send (0 for nil), for audit or metrics middleware
 
+## Binding, errors and auth helpers
+
+`xttp.Bind(c, &in)` decodes JSON strictly: unknown fields, trailing data and wrong types are a 400. `xttp.BindQuery(c, &q)` binds the query. A `required:"true"` query parameter on `Route.Query` is now enforced with a 400 naming it, after `Route.Middlewares`.
+
+`Config.MapError` turns your own errors into `*xttp.Error` in one place; `CodeOf` and `IsCode` read the code back. `Config.OnResponse` gets the final status of every routed request, including panics, for audit logs and metrics.
+
+`xttp.BearerTokens(tokens...)` and `xttp.APIKey(header, keys...)` compare in constant time and panic at startup on an empty list. Pair them with `Route.Security` and `Config.SecuritySchemes` to document them. Custom auth middleware records the caller with `SetPrincipal`; handlers read it with `PrincipalOf`.
+
 ## Struct tags
 
 | Tag        | Where        | Meaning                                       |

@@ -90,7 +90,7 @@ Register every pool before `Run`; `Register` after `Run`, or a second `Run`, pan
 | `ShutdownGrace`     | The whole shutdown budget, see below                                                     | `DefaultShutdownGrace` (20s) |
 | `DrainQueue`        | Finish queued jobs on shutdown instead of dropping them                                  | `false`                    |
 
-`Worker[T].Describe` (optional) replaces `"job", job` in log lines, so a job carrying a large slice does not print it twice. `Result.Job` always carries the whole job.
+Log lines never include the job payload, which can hold personal data. `Worker[T].Describe` (optional) adds the fields you choose, such as an id. `Result.Job` always carries the whole job.
 
 `EveryConfig`: `Name`, `Interval` (default 1m), `Timeout` per pass (default `DefaultTimeout`), `Logger`, `OnPanic`.
 

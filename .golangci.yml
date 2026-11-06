@@ -4,7 +4,24 @@ linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
     - gosec # security: weak crypto, unsafe, integer overflow, file perms
+    - bidichk # trojan-source: dangerous unicode bidi characters
+    - bodyclose # unclosed HTTP response bodies leak connections
+    - errchkjson # unchecked JSON encode errors, unsafe types
+    - errorlint # wrapped errors compared without errors.Is/As
+    - forcetypeassert # unchecked type assertions panic on bad input
+    - nilerr # returns nil despite a non-nil err, swallowing failures
+    - noctx # HTTP/DB/exec calls that ignore context cancellation
+    - nolintlint # every nolint must be specific and used
+    - reassign # reassigning package vars such as http.DefaultClient
+    - rowserrcheck # sql.Rows.Err never checked
+    - sqlclosecheck # sql.Rows and Stmt never closed
   settings:
+    gosec:
+      severity: low
+      confidence: low
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     staticcheck:
       checks: ["all"] # staticcheck + gosimple + stylecheck, every check
   exclusions:
@@ -12,6 +29,8 @@ linters:
       - path: _test\.go
         linters: [gosec]
         text: "G101" # fixture DSNs in tests are not credentials
+      - path: _test\.go
+        linters: [bodyclose, forcetypeassert, noctx] # short-lived test code, not request paths
 
 formatters:
   enable:

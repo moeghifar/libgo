@@ -315,3 +315,24 @@ func TestEveryUsesItsLoggerAndOnPanic(t *testing.T) {
 		t.Errorf("injected logger missed the ticker's lines:\n%s", out)
 	}
 }
+
+func TestJobPayloadIsNotLogged(t *testing.T) {
+	type secretJob struct{ Email string }
+	var logs bytes.Buffer
+	wp := New()
+	wp.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	done := make(chan struct{})
+	w := Register(wp, Config{Name: "p"}, func(context.Context, secretJob) error { close(done); return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { wp.Run(ctx); close(stopped) }()
+	if err := w.Submit(ctx, secretJob{Email: "a@b.c"}); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	cancel()
+	<-stopped
+	if strings.Contains(logs.String(), "a@b.c") {
+		t.Fatalf("payload logged:\n%s", logs.String())
+	}
+}

@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.3.0 (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xttp:** a `required:"true"` query parameter on `Route.Query` is now enforced with a 400; it was documentation only
+* **foreverwork:** log lines no longer include the job payload; set `Worker[T].Describe` to log chosen fields
+* Go 1.27.3 or later is required
+
+
+### Features
+
+* **xttp:** `Bind` (strict JSON) and `BindQuery`, returning a 400 `*Error`
+* **xttp:** `Config.MapError`, `CodeOf`, `IsCode`
+* **xttp:** `Config.OnResponse`, called with the final status, also after a recovered panic and with `AccessLog` off
+* **xttp:** `Principal`, `SetPrincipal`, `PrincipalOf`, and constant-time `BearerTokens` and `APIKey` that refuse to start with no secrets
+* **xttp:** `Route.Security` and `Config.SecuritySchemes` in the OpenAPI document
+* `example/` is the hardened reference service: per-command config, JSON logs, shared signal context, version injection, token auth, a sample `internal/` module, `.env.example` and a hardened Dockerfile
+* separate `make` commands for each check, plus `trivy` and `gitleaks` scans
+
+
+### Bug Fixes
+
+* **security:** update to Go 1.27.3 (GO-2026-6809) and patch `golang.org/x/net` and `golang.org/x/crypto` (GO-2026-6866, GO-2026-6860, GO-2026-5932); `x/crypto` is pinned to a pre-release commit until a tagged fix exists
+* **deps:** update `fiber/v3` to 3.6.1 and `fasthttp` to 1.77.0
+
+
 ## 0.2.0 (2026-10-19)
 
 

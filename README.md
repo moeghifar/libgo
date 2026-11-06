@@ -38,11 +38,11 @@ api.Add(xttp.Route{
 api.Run(ctx, ":8080") // graceful stop on SIGINT/SIGTERM
 ```
 
-Out of the box: request ID, slog access log, panic recovery, helmet headers and `Cache-Control: no-store` on every response (413/431 included), no `Server` banner, 100 req/s rate limit per IP, 1 MiB body limit, read/write/idle timeouts, dual-stack listener, Kubernetes probes (`/livez`, `/readyz`, `/startupz`), JSON:API errors including 404, and optional CORS, docs (`Docs{Enabled: true}`), pprof behind a guard, a `HelmetStrict` preset and strict `application/json` bodies. [`example/strict`](example/strict) is the hardened profile. See the [xttp README](pkg/xttp/README.md#server-defaults).
+Out of the box: request ID, slog access log, panic recovery, helmet headers and `Cache-Control: no-store` on every response (413/431 included), no `Server` banner, 100 req/s rate limit per IP, 1 MiB body limit, read/write/idle timeouts, dual-stack listener, Kubernetes probes (`/livez`, `/readyz`, `/startupz`), JSON:API errors including 404, and optional CORS, docs (`Docs{Enabled: true}`), pprof behind a guard, a `HelmetStrict` preset and strict `application/json` bodies. [`example/`](example) runs this hardened profile. See the [xttp README](pkg/xttp/README.md#server-defaults).
 
 ## Example
 
-[`example/`](example) wires all four packages together: `envy` loads the config, `climd` parses the command, and `serve` runs an `xttp` API that queues jobs on a `foreverwork` pool.
+[`example/`](example) is the reference bootstrap: copy it to start a new service. `envy` loads each command's config, `climd` parses the command, and `serve` runs a hardened `xttp` API that queues jobs on a `foreverwork` pool. Settings are in [`.env.example`](example/.env.example), and business code goes in `internal/<module>`.
 
 ```sh
 go run ./example serve
@@ -54,11 +54,20 @@ open http://localhost:8080/docs
 ## Development
 
 ```sh
-make test   # go test -race ./...
-make lint   # golangci-lint, then govulncheck
+make check     # everything below, in order
+make verify    # go mod verify
+make vet       # go vet ./...
+make test      # go test -race ./...
+make lint      # golangci-lint: code quality
+make security  # golangci-lint: security linters only
+make vuln      # govulncheck: known vulnerabilities
+make trivy     # trivy (Docker): dependencies, secrets, misconfiguration
+make secrets   # gitleaks: secrets in git history
+make docker    # build the hardened example image
+make docker-run # run it isolated on 127.0.0.1:8080
 ```
 
-CI runs `go mod verify`, `go vet`, the race tests, golangci-lint and govulncheck on every push and pull request.
+CI runs each of these as its own step on every push and pull request.
 
 Releases use [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) with conventional commits; see [CHANGELOG.md](CHANGELOG.md).
 

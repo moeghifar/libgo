@@ -173,6 +173,7 @@ func getUser(c fiber.Ctx) error {
 - Safe without middlewares: requests fasthttp rejects before routing still get a valid document, with the security headers
 - `xttp.ErrorDocument{Errors []ErrorObject}` is the wire type; a `Responses` entry ≥ 400 with `nil` or `ErrorDocument{}` is documented as `application/vnd.api+json` with that schema, and `Config.DefaultErrors` adds it to every route
 - `xttp.StatusOf(err)` returns the status the handler will send (0 for nil), for audit or metrics middleware
+- `xttp.Error`, `Errors` and `ErrorSource` are aliases of [`xerr`](../xerr/README.md); code that serves no HTTP (workers, CLIs, gRPC) imports `xerr` and returns the same values without linking Fiber
 
 ## Binding, errors and auth helpers
 

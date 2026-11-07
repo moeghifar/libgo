@@ -1,6 +1,7 @@
 package xttp
 
 import (
+	"net/textproto"
 	"reflect"
 	"sort"
 	"strconv"
@@ -70,6 +71,8 @@ type headerSet struct {
 	extra  [][2]string          // Config.Headers only (set at the fasthttp layer as well)
 	hsts   string               // Strict-Transport-Security value, sent on TLS requests
 	next   func(fiber.Ctx) bool // helmet.Config.Next
+	raw    [][2][]byte          // static, keys canonicalised at New: set skips per-request normalisation
+	hstsB  []byte
 }
 
 func newHeaderSet(h helmet.Config, extra map[string]string) *headerSet {
@@ -110,6 +113,9 @@ func newHeaderSet(h helmet.Config, extra map[string]string) *headerSet {
 	}
 	sort.Slice(hs.static, func(i, j int) bool { return hs.static[i][0] < hs.static[j][0] })
 	sort.Slice(hs.extra, func(i, j int) bool { return hs.extra[i][0] < hs.extra[j][0] })
+	for _, s := range hs.static {
+		hs.raw = append(hs.raw, [2][]byte{[]byte(textproto.CanonicalMIMEHeaderKey(s[0])), []byte(s[1])})
+	}
 	if h.HSTSMaxAge > 0 {
 		hs.hsts = "max-age=" + strconv.Itoa(h.HSTSMaxAge)
 		if !h.HSTSExcludeSubdomains {
@@ -118,17 +124,21 @@ func newHeaderSet(h helmet.Config, extra map[string]string) *headerSet {
 		if h.HSTSPreloadEnabled {
 			hs.hsts += "; preload"
 		}
+		hs.hstsB = []byte(hs.hsts)
 	}
 	return hs
 }
 
 // set writes every static header; handlers that run later may override them.
+// Keys were canonicalised at New, so each header is one SetCanonical instead of
+// fiber's Set (canonical check + fasthttp key normalisation per call).
 func (hs *headerSet) set(c fiber.Ctx) {
-	for _, h := range hs.static {
-		c.Set(h[0], h[1])
+	rh := &c.Response().Header
+	for _, h := range hs.raw {
+		rh.SetCanonical(h[0], h[1])
 	}
-	if hs.hsts != "" && c.Secure() {
-		c.Set(fiber.HeaderStrictTransportSecurity, hs.hsts)
+	if hs.hstsB != nil && c.Secure() {
+		rh.SetCanonical([]byte(fiber.HeaderStrictTransportSecurity), hs.hstsB)
 	}
 }
 

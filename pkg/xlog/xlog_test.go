@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -98,32 +97,6 @@ func TestRedact(t *testing.T) {
 	}
 }
 
-func TestSecret(t *testing.T) {
-	s := Secret("hunter2")
-	var buf bytes.Buffer
-	slog.New(slog.NewTextHandler(&buf, nil)).Info("x", "pw", s, "any", slog.AnyValue(s))
-	out := buf.String() + fmt.Sprintf("%v %s", s, s)
-	if strings.Contains(out, "hunter2") || strings.Count(out, Redacted) != 4 {
-		t.Fatalf("got %q", out)
-	}
-}
-
-func TestDSN(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"postgres://u:p@h:5432/db?sslmode=disable", "postgres://u:xxxxx@h:5432/db?sslmode=disable"},
-		{"mysql://u@h/db", "mysql://u@h/db"},
-		{"redis://:secret@h:6379/0", "redis://:xxxxx@h:6379/0"},
-		{"host=h user=u password=p", "host=h user=u password=p"},
-		{"", ""},
-		{"://bad", "://bad"},
-	}
-	for _, tt := range tests {
-		if got := DSN(tt.in); got != tt.want {
-			t.Errorf("DSN(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestDevHandler(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 6e6, time.UTC)
 	tests := []struct {
@@ -142,7 +115,6 @@ func TestDevHandler(t *testing.T) {
 		{"level filter", &DevOptions{Level: slog.LevelWarn}, func(l *slog.Logger) { l.Info("m") }, ""},
 		{"debug", &DevOptions{Level: slog.LevelDebug}, func(l *slog.Logger) { l.Debug("m") }, "03:04:05.006 DEBUG m\n"},
 		{"redact", &DevOptions{ReplaceAttr: Redact("pw")}, func(l *slog.Logger) { l.Info("m", "pw", "x") }, "03:04:05.006 INFO  m pw=[REDACTED]\n"},
-		{"secret", nil, func(l *slog.Logger) { l.Info("m", "pw", Secret("x")) }, "03:04:05.006 INFO  m pw=[REDACTED]\n"},
 		{"color", &DevOptions{Color: true}, func(l *slog.Logger) { l.Info("m", "k", "v") },
 			"\x1b[2m03:04:05.006\x1b[0m \x1b[32mINFO \x1b[0m m \x1b[2mk=\x1b[0mv\n"},
 	}
@@ -223,3 +195,39 @@ func (f fixedTime) WithAttrs(a []slog.Attr) slog.Handler {
 	return fixedTime{f.Handler.WithAttrs(a), f.at}
 }
 func (f fixedTime) WithGroup(n string) slog.Handler { return fixedTime{f.Handler.WithGroup(n), f.at} }
+
+func TestContextAttrsStayTopLevelUnderGroups(t *testing.T) {
+	var buf strings.Builder
+	ctx := WithAttrs(context.Background(), slog.String("request_id", "r1"))
+	l := slog.New(Handler{Next: slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: func(g []string, a slog.Attr) slog.Attr {
+			if len(g) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})}).With("a", 1).WithGroup("db").With("b", 2)
+	l.InfoContext(ctx, "q", "c", 3)
+	want := `{"level":"INFO","msg":"q","a":1,"request_id":"r1","db":{"b":2,"c":3}}` + "\n"
+	if buf.String() != want {
+		t.Errorf("got  %swant %s", buf.String(), want)
+	}
+}
+
+func TestRedactGroupContents(t *testing.T) {
+	var buf strings.Builder
+	l := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{ReplaceAttr: Redact("password")}))
+	l.Info("x", slog.Group("Password", slog.String("v", "leak")))
+	if s := buf.String(); strings.Contains(s, "leak") || !strings.Contains(s, Redacted) {
+		t.Errorf("group not redacted: %s", s)
+	}
+}
+
+func TestDevHandlerEscapesControlChars(t *testing.T) {
+	var buf strings.Builder
+	slog.New(NewDevHandler(&buf, nil)).Info("a\nFAKE", "k\n", "v\x1b[31m\r")
+	s := buf.String()
+	if strings.Count(s, "\n") != 1 || strings.ContainsAny(s, "\x1b\r") {
+		t.Errorf("control characters reached output: %q", s)
+	}
+}

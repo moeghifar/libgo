@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // DevOptions configures NewDevHandler. The zero value logs Info and above
@@ -113,7 +115,7 @@ func (h *DevHandler) Handle(_ context.Context, r slog.Record) error {
 		b = append(b, ansiReset...)
 	}
 	b = append(b, ' ')
-	b = append(b, r.Message...)
+	b = appendText(b, r.Message)
 	if h.opts.AddSource && r.PC != 0 {
 		if s := r.Source(); s != nil {
 			b = fmt.Appendf(b, " %s:%d", filepath.Base(s.File), s.Line)
@@ -165,7 +167,7 @@ func (h *DevHandler) appendAttr(b []byte, a slog.Attr) []byte {
 	for _, g := range h.groups {
 		b = append(append(b, g...), '.')
 	}
-	b = append(b, a.Key...)
+	b = appendText(b, a.Key)
 	b = append(b, '=')
 	if h.opts.Color {
 		b = append(b, ansiReset...)
@@ -189,8 +191,21 @@ func appendValue(b []byte, v slog.Value) []byte {
 }
 
 func appendString(b []byte, s string) []byte {
-	if s == "" || bytes.ContainsAny([]byte(s), " \t\n\"=") {
+	if s == "" || hasControl(s) || strings.ContainsAny(s, " \"=") {
 		return strconv.AppendQuote(b, s)
 	}
 	return append(b, s...)
+}
+
+// appendText writes a message or key as is, quoted only if it holds control
+// characters: a newline or ANSI escape must not forge lines on the terminal.
+func appendText(b []byte, s string) []byte {
+	if hasControl(s) {
+		return strconv.AppendQuote(b, s)
+	}
+	return append(b, s...)
+}
+
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, unicode.IsControl)
 }

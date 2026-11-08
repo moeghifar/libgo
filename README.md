@@ -16,7 +16,7 @@ Requires Go 1.27.2 or later.
 | [`climd`](pkg/climd/README.md) | Lightweight CLI builder, a Cobra alternative described by one struct | stdlib |
 | [`foreverwork`](pkg/foreverwork/README.md) | Typed worker pools and tickers with timeouts, panic recovery and graceful shutdown | stdlib |
 | [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors and production defaults | Fiber v3 |
-| [`xlog`](pkg/xlog/README.md) | What `log/slog` lacks: context attrs (`request_id` on every `InfoContext` line), `Redact`/`Secret`/`DSN` masking and a compact coloured dev handler | stdlib |
+| [`xlog`](pkg/xlog/README.md) | What `log/slog` lacks: context attrs (`request_id` on every `InfoContext` line), `Redact` by key and a compact coloured dev handler | stdlib |
 
 ### xttp at a glance
 

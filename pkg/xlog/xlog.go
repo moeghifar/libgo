@@ -1,6 +1,6 @@
-// Package xlog adds the three things log/slog does not ship: attributes
-// carried by a context.Context, key- and type-based redaction, and a compact
-// coloured handler for development.
+// Package xlog adds what log/slog does not ship: attributes carried by a
+// context.Context, key-based redaction, and a compact coloured handler for
+// development.
 //
 // It is stdlib only, has no global state and no init(). Multi-handlers, level
 // switches and discard handlers are already in log/slog and are not repeated.
@@ -9,7 +9,6 @@ package xlog
 import (
 	"context"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strings"
 )
@@ -36,74 +35,89 @@ func Attrs(ctx context.Context) []slog.Attr {
 	return a
 }
 
-// Handler wraps Next and appends the context attributes to each record.
+// Handler wraps Next and adds the context attributes to each record, at the
+// top level even when the logger has open groups, so a field like request_id
+// is always found under the same key.
 //
 //	h := xlog.Handler{Next: slog.NewJSONHandler(os.Stdout, nil)}
 //	slog.SetDefault(slog.New(h))
 type Handler struct {
 	Next slog.Handler
+
+	root slog.Handler                      // Next as it was before the first group
+	ops  []func(slog.Handler) slog.Handler // WithAttrs/WithGroup calls since root
 }
 
 // Enabled reports whether Next is enabled for level.
 func (h Handler) Enabled(ctx context.Context, l slog.Level) bool { return h.Next.Enabled(ctx, l) }
 
-// Handle appends the context attributes to r and forwards it to Next.
+// Handle adds the context attributes to r and forwards it to Next.
 func (h Handler) Handle(ctx context.Context, r slog.Record) error {
-	if a := Attrs(ctx); len(a) > 0 {
+	a := Attrs(ctx)
+	if len(a) == 0 {
+		return h.Next.Handle(ctx, r)
+	}
+	if h.root == nil {
 		r = r.Clone()
 		r.AddAttrs(a...)
+		return h.Next.Handle(ctx, r)
 	}
-	return h.Next.Handle(ctx, r)
+	// A group is open: put the attrs below it by replaying the chain.
+	n := h.root.WithAttrs(a)
+	for _, op := range h.ops {
+		n = op(n)
+	}
+	return n.Handle(ctx, r)
 }
 
 // WithAttrs returns a Handler whose Next carries attrs.
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return Handler{Next: h.Next.WithAttrs(attrs)}
+	if len(attrs) == 0 {
+		return h
+	}
+	return h.with(h.root, func(n slog.Handler) slog.Handler { return n.WithAttrs(attrs) })
 }
 
 // WithGroup returns a Handler whose Next opens group name.
-func (h Handler) WithGroup(name string) slog.Handler { return Handler{Next: h.Next.WithGroup(name)} }
+func (h Handler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
+	root := h.root
+	if root == nil {
+		root = h.Next
+	}
+	return h.with(root, func(n slog.Handler) slog.Handler { return n.WithGroup(name) })
+}
+
+func (h Handler) with(root slog.Handler, op func(slog.Handler) slog.Handler) slog.Handler {
+	c := Handler{Next: op(h.Next), root: root}
+	if root != nil {
+		c.ops = append(slices.Clip(h.ops), op)
+	}
+	return c
+}
 
 // Redacted is the value every redacted attribute is replaced with.
 const Redacted = "[REDACTED]"
 
 // Redact returns a HandlerOptions.ReplaceAttr function that replaces the
-// value of any attribute whose key matches one of keys (case-insensitive,
-// in any group) with Redacted.
+// value of any attribute whose key matches one of keys, case-insensitively,
+// in any group. Every attribute inside a group named by one of keys is
+// replaced too.
 func Redact(keys ...string) func(groups []string, a slog.Attr) slog.Attr {
 	set := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
 		set[strings.ToLower(k)] = struct{}{}
 	}
-	return func(_ []string, a slog.Attr) slog.Attr {
-		if _, ok := set[strings.ToLower(a.Key)]; ok && a.Value.Kind() != slog.KindGroup {
+	match := func(k string) bool {
+		_, ok := set[strings.ToLower(k)]
+		return ok
+	}
+	return func(groups []string, a slog.Attr) slog.Attr {
+		if a.Value.Kind() != slog.KindGroup && (match(a.Key) || slices.ContainsFunc(groups, match)) {
 			a.Value = slog.StringValue(Redacted)
 		}
 		return a
 	}
-}
-
-// Secret is a string that logs as Redacted. Use it for passwords and tokens
-// in config structs so they can never reach a log line by accident.
-type Secret string
-
-// LogValue implements slog.LogValuer.
-func (Secret) LogValue() slog.Value { return slog.StringValue(Redacted) }
-
-// String implements fmt.Stringer so %v and %s never print the secret either.
-func (Secret) String() string { return Redacted }
-
-// DSN masks the password in a URL-style DSN such as
-// postgres://user:pass@host/db, returning postgres://user:xxxxx@host/db.
-// A DSN without a password, or one that does not parse, is returned as is.
-func DSN(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil || u.User == nil {
-		return dsn
-	}
-	if _, ok := u.User.Password(); !ok {
-		return dsn
-	}
-	u.User = url.UserPassword(u.User.Username(), "xxxxx")
-	return u.String()
 }

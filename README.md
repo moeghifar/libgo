@@ -6,7 +6,7 @@ A toolset of small Go libraries: lightweight, fast and clean. Each package under
 go get github.com/moeghifar/libgo@latest
 ```
 
-Requires Go 1.27.2 or later.
+Requires Go 1.27.3 or later.
 
 ## Packages
 
@@ -17,6 +17,7 @@ Requires Go 1.27.2 or later.
 | [`foreverwork`](pkg/foreverwork/README.md) | Typed worker pools and tickers with timeouts, panic recovery and graceful shutdown | stdlib |
 | [`xerr`](pkg/xerr/README.md) | Typed JSON:API error values (`Error`, `Errors`, `StatusOf`, `CodeOf`) shared by HTTP, gRPC, workers and CLIs | stdlib |
 | [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors (`xerr`) and production defaults | Fiber v3 |
+| [`xlog`](pkg/xlog/README.md) | What `log/slog` lacks: context attrs (`request_id` on every `InfoContext` line), `Redact` by key and a compact coloured dev handler | stdlib |
 
 ### xttp at a glance
 

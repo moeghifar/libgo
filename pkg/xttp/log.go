@@ -24,14 +24,17 @@ func (a *API) observe(c fiber.Ctx) error {
 		if status >= fiber.StatusInternalServerError {
 			level = slog.LevelError
 		}
-		a.log.Log(c.Context(), level, "http request",
-			"request_id", requestid.FromContext(c),
-			"method", c.Method(),
-			"path", c.Path(),
-			"status", status,
-			"latency", time.Since(start),
-			"ip", c.IP(),
-		)
+		if ctx := c.Context(); a.log.Enabled(ctx, level) {
+			// LogAttrs: typed attrs, no interface boxing per value.
+			a.log.LogAttrs(ctx, level, "http request",
+				slog.String("request_id", requestid.FromContext(c)),
+				slog.String("method", c.Method()),
+				slog.String("path", c.Path()),
+				slog.Int("status", status),
+				slog.Duration("latency", time.Since(start)),
+				slog.String("ip", c.IP()),
+			)
+		}
 	}
 	if a.onResponse != nil {
 		func() {

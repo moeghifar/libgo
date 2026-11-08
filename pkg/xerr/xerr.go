@@ -60,12 +60,20 @@ func (e *Error) Unwrap() error { return e.Err }
 // Errors reports several problems at once, e.g. one per invalid field.
 type Errors []*Error
 
-func (es Errors) Error() string { return errors.Join(es.Unwrap()...).Error() }
+func (es Errors) Error() string {
+	if err := errors.Join(es.Unwrap()...); err != nil {
+		return err.Error()
+	}
+	return "no errors"
+}
 
+// Unwrap returns the non-nil members.
 func (es Errors) Unwrap() []error {
-	out := make([]error, len(es))
-	for i, e := range es {
-		out[i] = e
+	out := make([]error, 0, len(es))
+	for _, e := range es {
+		if e != nil {
+			out = append(out, e)
+		}
 	}
 	return out
 }

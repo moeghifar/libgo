@@ -149,3 +149,14 @@ func TestStdlibOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorsErrorDoesNotPanic(t *testing.T) {
+	for _, es := range []Errors{nil, {}, {nil}} {
+		if got := es.Error(); got != "no errors" {
+			t.Errorf("%#v.Error() = %q", es, got)
+		}
+	}
+	if got := (Errors{nil, {Title: "a"}}).Error(); got != "a" {
+		t.Errorf("mixed list = %q", got)
+	}
+}

@@ -33,3 +33,6 @@ go.work.sum
 
 # spec workspace (local only)
 .specify/
+
+# Claude Code worktrees and local state
+.claude/

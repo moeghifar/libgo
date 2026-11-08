@@ -6,18 +6,12 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
-	"github.com/gofiber/fiber/v3/middleware/healthcheck"
 	"github.com/gofiber/fiber/v3/middleware/helmet"
-	"github.com/gofiber/fiber/v3/middleware/limiter"
-	"github.com/gofiber/fiber/v3/middleware/pprof"
-	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/valyala/fasthttp"
 )
 
@@ -33,10 +27,32 @@ const (
 	MaxRequestIDLength     = 72 // two UUIDs
 )
 
+// Mode selects what New registers around your routes: ModeDefault or ModeRaw.
+// Each mode is a function so the linker keeps only the one a program names.
+// Nil means ModeDefault, except in a build with -tags xttp_slim, where it
+// panics: that tag stops New itself from referencing the middleware, so a
+// program naming only ModeRaw links none of it.
+type Mode func(a *API, app *fiber.App, cfg *Config)
+
+// ModeRaw registers no middleware and no probes. Timeouts, BodyLimit, the
+// JSON:API ErrorHandler, route-level checks and the OpenAPI document stay.
+// Everything else is yours to add, or to get from a proxy in front: a handler
+// panic crashes the process, and there are no security headers, rate limit,
+// access log or request id. New panics when it is combined with a Config field
+// that needs them.
+func ModeRaw(_ *API, _ *fiber.App, cfg *Config) {
+	if f := rawConflict(cfg); f != "" {
+		panic("xttp: ModeRaw cannot honour Config." + f)
+	}
+}
+
 // Config describes the whole server. Every field is optional: zero values keep
 // the defaults, security features are on by default and debug features off.
 type Config struct {
 	Info Info
+
+	// Mode is ModeDefault (nil) or ModeRaw.
+	Mode Mode
 
 	// Fiber is the base Fiber config: TrustProxy, ProxyHeader, Prefork, ...
 	// ReadTimeout, WriteTimeout, IdleTimeout and BodyLimit get the Default*
@@ -149,6 +165,9 @@ type Health struct {
 // the rate limiter, the content-type check (when enabled) and the docs routes
 // (when enabled). Unknown routes, panics and every returned error render
 // through (*API).ErrorHandler.
+//
+// ModeRaw mounts none of the probes or middleware; see Mode. New panics when
+// ModeRaw is combined with a field that needs them.
 func New(cfg Config) *API {
 	if cfg.Profiling.Enabled && len(cfg.Profiling.Guard) == 0 && !cfg.Profiling.AllowUnguarded {
 		panic("xttp: Profiling.Enabled needs a Guard (or AllowUnguarded for local development)")
@@ -183,44 +202,7 @@ func New(cfg Config) *API {
 	fc.ErrorHandler = a.ErrorHandler
 	app := fiber.New(fc)
 	a.app, a.router = app, app
-	a.harden(app.Server(), on(cfg.HideServerHeader))
-
-	var stopping atomic.Bool
-	app.Hooks().OnPreShutdown(func() error { stopping.Store(true); return nil })
-	ready := cfg.Health.Ready
-	app.Get(healthcheck.LivenessEndpoint, healthcheck.New(healthcheck.Config{Probe: cfg.Health.Live}))
-	app.Get(healthcheck.ReadinessEndpoint, healthcheck.New(healthcheck.Config{Probe: func(c fiber.Ctx) bool {
-		return !stopping.Load() && (ready == nil || ready(c))
-	}}))
-	app.Get(healthcheck.StartupEndpoint, healthcheck.New(healthcheck.Config{Probe: cfg.Health.Startup}))
-
-	app.Use(dropBadRequestID, requestid.New())
-	if a.accessLog || a.onResponse != nil {
-		app.Use(a.observe)
-	}
-	app.Use(recoverer.New(), a.headers.middleware)
-	if cfg.CORS != nil {
-		app.Use(cors.New(*cfg.CORS))
-	}
-	if cfg.Profiling.Enabled {
-		chain := append([]any{cfg.Profiling.Prefix + "/debug/pprof"}, handlers(cfg.Profiling.Guard)...)
-		app.Use(append(chain, pprof.New(pprof.Config{Prefix: cfg.Profiling.Prefix}))...)
-	}
-	if cfg.RateLimit == 0 {
-		cfg.RateLimit = DefaultRateLimit
-	}
-	if cfg.RateLimit > 0 {
-		app.Use(limiter.New(limiter.Config{
-			Max:               cfg.RateLimit,
-			Expiration:        time.Second,
-			LimiterMiddleware: limiter.SlidingWindow{},
-			LimitReached:      func(fiber.Ctx) error { return fiber.ErrTooManyRequests },
-			DisableHeaders:    cfg.RateLimitHeaders == nil || !*cfg.RateLimitHeaders,
-		}))
-	}
-	if cfg.StrictContentType {
-		app.Use(strictContentType)
-	}
+	resolveMode(cfg.Mode)(a, app, &cfg)
 	if cfg.Docs.Enabled {
 		path := cfg.Docs.Path
 		if path == "" {
@@ -237,6 +219,30 @@ func New(cfg Config) *API {
 	}
 	a.listen = cfg.Listen
 	return a
+}
+
+// rawConflict names a Config field ModeRaw cannot honour, or "".
+func rawConflict(cfg *Config) string {
+	h := cfg.Health
+	switch {
+	case cfg.RateLimit > 0:
+		return "RateLimit"
+	case cfg.StrictContentType:
+		return "StrictContentType"
+	case cfg.CORS != nil:
+		return "CORS"
+	case cfg.Profiling.Enabled:
+		return "Profiling"
+	case cfg.OnResponse != nil:
+		return "OnResponse"
+	case cfg.AccessLog != nil && *cfg.AccessLog:
+		return "AccessLog"
+	case h.Live != nil || h.Ready != nil || h.Startup != nil:
+		return "Health"
+	case len(cfg.Headers) > 0:
+		return "Headers"
+	}
+	return ""
 }
 
 // harden works at the fasthttp layer so it covers every response, including

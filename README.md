@@ -71,6 +71,14 @@ CI runs each of these as its own step on every push and pull request.
 
 Releases use [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) with conventional commits; see [CHANGELOG.md](CHANGELOG.md).
 
+### Smaller binaries
+
+Strip paths and debug info for release builds, 31-35% smaller:
+
+```sh
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/yourapp
+```
+
 ## License
 
 [Apache 2.0](LICENSE)

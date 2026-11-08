@@ -455,6 +455,9 @@ func toAny(ss []string) []any {
 
 const scalarJS = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.122/dist/browser/standalone.min.js"
 
+// scalarSRI pins the exact bytes of scalarJS; change both together.
+const scalarSRI = "sha384-GSEN1x/V+skrQFYZQ1d4OxNM7t1xg7f8WND43lCquTJEO+mRo9l0AAa3HzrNOLqt"
+
 // docsCSP allows exactly the Scalar script, the spec on this origin, and the
 // inline styles and data: images Scalar injects. No inline script. The CDN
 // answers with Cross-Origin-Resource-Policy: cross-origin, so helmet's
@@ -470,7 +473,7 @@ func docsPage(title, specURL string) string {
 		escapeHTML(title) + `</title></head>
 <body>
 <script id="api-reference" data-url="` + escapeHTML(specURL) + `"></script>
-<script src="` + scalarJS + `"></script>
+<script src="` + scalarJS + `" integrity="` + scalarSRI + `" crossorigin="anonymous"></script>
 </body>
 </html>`
 }

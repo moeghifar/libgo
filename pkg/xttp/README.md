@@ -114,6 +114,24 @@ Middleware order: probes (not logged, not limited) → request id → slog acces
 
 Middleware can read the status of a returned error with `xttp.StatusOf(err)`: the error handler sets the response status only after the chain returned.
 
+## Mode
+
+`Config.Mode` picks what `New` registers. `ModeDefault` (also an unset `Mode`) is everything on this page. `ModeRaw` registers no middleware and no probes, for a service that gets those from a proxy in front or adds its own:
+
+```go
+api := xttp.New(xttp.Config{Mode: xttp.ModeRaw})
+```
+
+In `ModeRaw` a handler panic crashes the process, and there are no security headers, rate limit, access log or request id. Timeouts, body limit, JSON:API errors and the OpenAPI document stay. `New` panics if you also set a field that needs the middleware.
+
+To strip the unused middleware from the binary, build with the tag (Fiber itself remains):
+
+```sh
+go build -tags xttp_slim .
+```
+
+The tag only removes what your code does not name: `ModeRaw` is stripped and `ModeDefault` keeps everything. An unset `Mode` panics at startup in a slim build, so name the mode you want.
+
 ## Security defaults
 
 Always on, with no field to switch them off:

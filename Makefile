@@ -2,7 +2,7 @@
 
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 VERSION := $(shell git describe --tags --always --dirty)
-GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@latest
+GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GITLEAKS := go run github.com/zricethezav/gitleaks/v8@v8.30.1
 TRIVY := docker run --rm -v $(CURDIR):/src:ro -v trivy-cache:/root/.cache/trivy aquasec/trivy:0.76.1
 # Split out of .golangci.yml so lint and security never report the same finding.

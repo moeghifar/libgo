@@ -19,7 +19,7 @@ AGENTS.md  ──▶  .specify/agents.md  ──▶  .specify/research/*.md
 ## 2. What libgo is
 
 A collection of small, independent Go packages under `pkg/`. Each package is a *toolset*,
-not a framework: importable on its own, no cross-package coupling, no init-time magic.
+not a framework: importable on its own, no cross-package coupling (a package may import a stdlib-only shared package such as `xerr`), no init-time magic.
 
 Shipped today:
 

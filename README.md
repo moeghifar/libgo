@@ -15,7 +15,8 @@ Requires Go 1.27.2 or later.
 | [`envy`](pkg/envy/README.md) | Loads environment variables and an optional `.env` file into a tagged struct | godotenv (drop it with `-tags libgo_envy_slim`) |
 | [`climd`](pkg/climd/README.md) | Lightweight CLI builder, a Cobra alternative described by one struct | stdlib |
 | [`foreverwork`](pkg/foreverwork/README.md) | Typed worker pools and tickers with timeouts, panic recovery and graceful shutdown | stdlib |
-| [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors and production defaults | Fiber v3 |
+| [`xerr`](pkg/xerr/README.md) | Typed JSON:API error values (`Error`, `Errors`, `StatusOf`, `CodeOf`) shared by HTTP, gRPC, workers and CLIs | stdlib |
+| [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors (`xerr`) and production defaults | Fiber v3 |
 
 ### xttp at a glance
 

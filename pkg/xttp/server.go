@@ -95,7 +95,9 @@ type Config struct {
 
 	// Docs serves the OpenAPI document and the Scalar page. Off by default.
 	Docs DocsConfig
-	// Profiling mounts net/http/pprof behind a guard. Off by default.
+	// Profiling mounts net/http/pprof behind a guard, in any Mode. Off by
+	// default, and it needs a build with -tags xttp_pprof: without the tag
+	// pprof is not in the binary and Enabled panics at startup.
 	Profiling ProfilingConfig
 
 	// Logger receives the access log and server errors. Nil means slog.Default().
@@ -161,8 +163,8 @@ type Health struct {
 // New creates the Fiber app with xttp's defaults and starts its document.
 // Mounted, in order: health probes (before every middleware, so probes are
 // never rate limited or logged), then request id, slog access log, panic
-// recovery, security headers, CORS (when configured), pprof (when enabled),
-// the rate limiter, the content-type check (when enabled) and the docs routes
+// recovery, security headers, CORS (when configured),
+// the rate limiter, the content-type check (when enabled), pprof (when enabled) and the docs routes
 // (when enabled). Unknown routes, panics and every returned error render
 // through (*API).ErrorHandler.
 //
@@ -203,6 +205,9 @@ func New(cfg Config) *API {
 	app := fiber.New(fc)
 	a.app, a.router = app, app
 	resolveMode(cfg.Mode)(a, app, &cfg)
+	if cfg.Profiling.Enabled {
+		mountProfiling(app, &cfg.Profiling)
+	}
 	if cfg.Docs.Enabled {
 		path := cfg.Docs.Path
 		if path == "" {
@@ -231,8 +236,6 @@ func rawConflict(cfg *Config) string {
 		return "StrictContentType"
 	case cfg.CORS != nil:
 		return "CORS"
-	case cfg.Profiling.Enabled:
-		return "Profiling"
 	case cfg.OnResponse != nil:
 		return "OnResponse"
 	case cfg.AccessLog != nil && *cfg.AccessLog:

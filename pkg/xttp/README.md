@@ -101,7 +101,7 @@ os.WriteFile("openapi.yaml", api.YAML(), 0o644)
 | Headers | `Cache-Control: no-store` on every response, probes and 413/431 included | `Headers: map[string]string{"X-Robots-Tag": "noindex", "Cache-Control": "-"}` |
 | HideServerHeader | true: no `Server` banner, also before routing | `HideServerHeader: &f` keeps `Fiber.ServerHeader` |
 | Docs | off | `Docs: DocsConfig{Enabled: true, Path: "/docs", Page: &f, Guard: []fiber.Handler{...}}`; `Page: false` serves only the spec files (no CDN script) |
-| Profiling | off | `Profiling: ProfilingConfig{Enabled: true, Guard: ...}`; a Guard is required (`New` panics without one) unless `AllowUnguarded` |
+| Profiling | off | `Profiling: ProfilingConfig{Enabled: true, Guard: ...}`; a Guard is required, and the build needs `-tags xttp_pprof` (`New` panics without one) unless `AllowUnguarded` |
 | Logger | `slog.Default()` | `Logger: *slog.Logger`, used by the access log and error handler |
 | AccessLog | on, one line per request | `AccessLog: &f`; errors ≥ 500 are still logged |
 | RateLimitHeaders | off: no `X-RateLimit-*` | `RateLimitHeaders: &t` |
@@ -110,7 +110,7 @@ os.WriteFile("openapi.yaml", api.YAML(), 0o644)
 | Listener | `tcp` (IPv4 + IPv6) | `Listen.ListenerNetwork: fiber.NetworkTCP4` |
 | Shutdown | `Run` stops on ctx done, SIGINT or SIGTERM; `/readyz` → 503; waits 10s for in-flight requests | `Listen.ShutdownTimeout`; TLS via `Listen.CertFile`… |
 
-Middleware order: probes (not logged, not limited) → request id → slog access log → recover → security headers → CORS → pprof → rate limit → content-type check → docs → your routes.
+Middleware order: probes (not logged, not limited) → request id → slog access log → recover → security headers → CORS → rate limit → pprof → content-type check → docs → your routes.
 
 Middleware can read the status of a returned error with `xttp.StatusOf(err)`: the error handler sets the response status only after the chain returned.
 
@@ -131,6 +131,17 @@ go build -tags xttp_slim .
 ```
 
 The tag only removes what your code does not name: `ModeRaw` is stripped and `ModeDefault` keeps everything. An unset `Mode` panics at startup in a slim build, so name the mode you want.
+
+## Profiling
+
+`Config.Profiling` is the one setting, and it works in any `Mode`. pprof is linked only into builds with the tag, so production binaries do not contain it:
+
+```sh
+go run -tags xttp_pprof .   # dev: Profiling.Enabled works
+go build .                  # prod: pprof is not in the binary
+```
+
+Without the tag, `Profiling.Enabled: true` panics at startup rather than being ignored.
 
 ## Security defaults
 

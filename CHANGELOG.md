@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.4.0 (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xttp:** pprof is compiled in only with `-tags xttp_pprof`; without it `Profiling.Enabled` panics at startup. Profiling now mounts in any `Mode`, including `ModeRaw`
+* **xerr:** `Error`, `ErrorSource` and `Errors` move to the stdlib-only `pkg/xerr`; xttp keeps type aliases
+
+
+### Features
+
+* **xttp:** `ModeDefault` and `ModeRaw`; `-tags xttp_slim` requires an explicit `Mode`, so `ModeRaw` builds leave the default middleware out (~0.7 MB smaller)
+* **xttp:** Subresource Integrity on the Scalar docs page
+* **xlog:** context attrs, redaction and a dev handler for `log/slog`
+* **perf(xttp):** precomputed canonical security headers, typed access-log attrs
+
+
+### Bug Fixes
+
+* **xerr:** `Errors.Error` no longer panics on empty or nil lists
+* **xlog:** drop Secret and DSN, redact group contents, keep context attrs top level, escape control chars
+
+
 ## 0.3.0 (2026-11-05)
 
 

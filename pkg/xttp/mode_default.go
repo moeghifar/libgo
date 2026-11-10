@@ -8,7 +8,6 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/healthcheck"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
-	"github.com/gofiber/fiber/v3/middleware/pprof"
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
@@ -34,10 +33,6 @@ func ModeDefault(a *API, app *fiber.App, cfg *Config) {
 	app.Use(recoverer.New(), a.headers.middleware)
 	if cfg.CORS != nil {
 		app.Use(cors.New(*cfg.CORS))
-	}
-	if cfg.Profiling.Enabled {
-		chain := append([]any{cfg.Profiling.Prefix + "/debug/pprof"}, handlers(cfg.Profiling.Guard)...)
-		app.Use(append(chain, pprof.New(pprof.Config{Prefix: cfg.Profiling.Prefix}))...)
 	}
 	if cfg.RateLimit == 0 {
 		cfg.RateLimit = DefaultRateLimit

@@ -311,6 +311,9 @@ func TestDocsPageCSP(t *testing.T) {
 }
 
 func TestProfiling(t *testing.T) {
+	if !profilingBuilt {
+		t.Skip("needs -tags xttp_pprof")
+	}
 	guard := func(c fiber.Ctx) error {
 		if c.Get("X-Key") != "k" {
 			return fiber.ErrUnauthorized

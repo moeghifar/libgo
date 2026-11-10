@@ -29,7 +29,6 @@ func TestModeRawRejectsConflicts(t *testing.T) {
 		"RateLimit":  {RateLimit: 10},
 		"AccessLog":  {AccessLog: &yes},
 		"Health":     {Health: Health{Live: func(fiber.Ctx) bool { return true }}},
-		"Profiling":  {Profiling: ProfilingConfig{Enabled: true, AllowUnguarded: true}},
 		"OnResponse": {OnResponse: func(fiber.Ctx, int, error) {}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -40,6 +39,19 @@ func TestModeRawRejectsConflicts(t *testing.T) {
 			}()
 			cfg.Mode = ModeRaw
 			New(cfg)
+		})
+	}
+}
+
+func TestProfilingFollowsBuildTagInAnyMode(t *testing.T) {
+	for name, mode := range map[string]Mode{"default": ModeDefault, "raw": ModeRaw} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); (r != nil) == profilingBuilt {
+					t.Errorf("recover = %v, profilingBuilt = %v", r, profilingBuilt)
+				}
+			}()
+			New(Config{Mode: mode, Profiling: ProfilingConfig{Enabled: true, AllowUnguarded: true}})
 		})
 	}
 }

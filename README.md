@@ -46,6 +46,8 @@ Out of the box: request ID, slog access log, panic recovery, helmet headers and 
 
 [`example/`](example) is the reference bootstrap: copy it to start a new service. `envy` loads each command's config, `climd` parses the command, and `serve` runs a hardened `xttp` API that queues jobs on a `foreverwork` pool. Settings are in [`.env.example`](example/.env.example), and business code goes in `internal/<module>`.
 
+[`example/fiber/`](example/fiber/main.go) shows that xttp doesn't stop you using any of Fiber: custom and stock Fiber middleware (global, group and per route), `timeout`-wrapped handlers, plain `app.Get` routes, `net/http` handlers through `adaptor`, and a mounted `*fiber.App`. Its test proves each one.
+
 ```sh
 go run ./example serve
 curl -X POST localhost:8080/v1/users -H 'Content-Type: application/json' \

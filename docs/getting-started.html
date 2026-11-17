@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started · libgo</title>
+<meta name="description" content="Build a full libgo service: envy config, climd commands, xttp API and a foreverwork pool, based on example/.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html" aria-current="page">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>Getting started</h1>
+<p class="lead"><code>example/</code> is the reference bootstrap: copy it to start a new service. Four packages, one binary, two commands.</p>
+
+<h2 id="run">Run it</h2>
+<pre><code class="language-sh">git clone https://github.com/moeghifar/libgo &amp;&amp; cd libgo
+cp example/.env.example example/.env
+echo &quot;API_TOKENS=$(openssl rand -hex 32)&quot; &gt;&gt; example/.env
+echo &quot;DOCS_ENABLED=true&quot; &gt;&gt; example/.env
+
+go run ./example serve
+# in another shell
+TOKEN=$(grep API_TOKENS example/.env | tail -1 | cut -d= -f2)
+curl -X POST localhost:8080/v1/users -H &#x27;Content-Type: application/json&#x27; \
+  -H &quot;Authorization: Bearer $TOKEN&quot; -d &#x27;{&quot;name&quot;:&quot;Ada&quot;,&quot;email&quot;:&quot;ada@example.com&quot;}&#x27;
+open http://localhost:8080/docs</code></pre>
+
+<h2 id="layout">Layout</h2>
+<pre><code class="language-text">example/
+├── main.go          climd commands; run[C] loads config + signal context
+├── config.go        envy structs: Log, ServeConfig, MigrateConfig
+├── serve.go         xttp server + foreverwork pool, wired and drained in order
+├── migrate.go       slot for one-shot jobs
+├── internal/user/   a sample business module: types, routes, jobs, tests
+├── .env.example     every setting with a comment
+└── Dockerfile       hardened multi-stage image</code></pre>
+
+<h2 id="main">1. Commands and config</h2>
+<p>Each command loads only its own config. The generic <code>run</code> adapter turns a typed <code>func(ctx, Config) error</code> into the climd signature and installs a context cancelled on SIGINT/SIGTERM.</p>
+<pre><code class="language-go">var version = &quot;dev&quot; // -ldflags &quot;-X main.version=1.2.3&quot;
+
+func run[C any](fn func(context.Context, C) error) func(context.Context, []string, map[string]string) error {
+	return func(ctx context.Context, _ []string, _ map[string]string) error {
+		var cfg C
+		if err := envy.Load(&amp;cfg); err != nil {
+			return fmt.Errorf(&quot;config: %w&quot;, err)
+		}
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return fn(ctx, cfg)
+	}
+}
+
+func main() {
+	climd.Execute(climd.AppConfig{
+		Name: &quot;example&quot;, Version: version, Description: &quot;Reference libgo service&quot;,
+		Commands: []climd.Command{
+			{Name: &quot;serve&quot;, Short: &quot;Run the HTTP API and workers&quot;, Run: run(serve)},
+			{Name: &quot;migrate&quot;, Short: &quot;Run database migrations&quot;, Run: run(migrate)},
+		},
+	})
+}</code></pre>
+<pre><code class="language-go">type Log struct {
+	Level string `env:&quot;LOG_LEVEL&quot; default:&quot;INFO&quot;`
+}
+
+// setup makes JSON on stdout the default logger.
+func (l Log) setup() error {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(l.Level)); err != nil {
+		return fmt.Errorf(&quot;LOG_LEVEL: %w&quot;, err)
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &amp;slog.HandlerOptions{Level: level})))
+	return nil
+}
+
+type ServeConfig struct {
+	Log
+	APITokens  []string `env:&quot;API_TOKENS&quot; required:&quot;true&quot;`
+	Addr       string   `env:&quot;APP_ADDR&quot; default:&quot;127.0.0.1:8080&quot;`
+	RateLimit  int      `env:&quot;RATE_LIMIT&quot; default:&quot;100&quot;`
+	Docs       bool     `env:&quot;DOCS_ENABLED&quot; default:&quot;false&quot;`
+	TrustProxy bool     `env:&quot;TRUST_PROXY&quot; default:&quot;false&quot;`
+}</code></pre>
+
+<h2 id="serve">2. Server and workers</h2>
+<p>The pool starts first and stops last: the API drains before the pool, so no request submits to a stopped pool.</p>
+<pre><code class="language-go">func serve(ctx context.Context, cfg ServeConfig) error {
+	if err := cfg.setup(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	wp := foreverwork.New()
+	welcome := foreverwork.Register(wp,
+		foreverwork.Config{Name: &quot;welcome&quot;, Workers: 2, QueueSize: 10, Timeout: 5 * time.Second},
+		user.SendWelcome)
+	workers := make(chan struct{})
+	go func() { wp.Run(ctx); close(workers) }()
+
+	api := newAPI(cfg)
+	api.Group(&quot;/v1&quot;, xttp.BearerTokens(cfg.APITokens...)).Add(user.Routes(welcome.Submit)...)
+
+	slog.InfoContext(ctx, &quot;starting&quot;, &quot;version&quot;, version, &quot;addr&quot;, cfg.Addr)
+	err := api.Run(ctx, cfg.Addr) // returns after the signal and the drain
+	cancel()
+	&lt;-workers
+	return err
+}
+
+func newAPI(cfg ServeConfig) *xttp.API {
+	return xttp.New(xttp.Config{
+		Info:              xttp.Info{Title: &quot;Example&quot;, Version: version},
+		Fiber:             fiber.Config{TrustProxy: cfg.TrustProxy},
+		HelmetPreset:      xttp.HelmetStrict,
+		StrictContentType: true,
+		RateLimit:         cfg.RateLimit,
+		DefaultErrors:     []int{400, 401, 404, 415, 429, 500},
+		SecuritySchemes:   map[string]any{&quot;bearer&quot;: map[string]any{&quot;type&quot;: &quot;http&quot;, &quot;scheme&quot;: &quot;bearer&quot;}},
+		Docs:              xttp.DocsConfig{Enabled: cfg.Docs},
+		Listen:            fiber.ListenConfig{DisableStartupMessage: true},
+	})
+}</code></pre>
+
+<h2 id="module">3. A business module</h2>
+<p><code>internal/user</code> owns its types, routes and jobs. It depends on the pool only through a <code>func</code>, so the test passes a counter.</p>
+<pre><code class="language-go">package user
+
+type User struct {
+	ID    int    `json:&quot;id,omitempty&quot;`
+	Name  string `json:&quot;name&quot; doc:&quot;Full name&quot;`
+	Email string `json:&quot;email&quot;`
+}
+
+type WelcomeJob struct{ Email string }
+
+var ErrInvalid = xttp.Error{Status: fiber.StatusBadRequest, Code: &quot;USR-400&quot;, Title: &quot;Invalid user&quot;}
+
+func SendWelcome(ctx context.Context, _ WelcomeJob) error {
+	slog.InfoContext(ctx, &quot;welcome email sent&quot;)
+	return nil
+}
+
+func Routes(submit func(context.Context, WelcomeJob) error) []xttp.Route {
+	return []xttp.Route{{
+		Method:    fiber.MethodPost,
+		Path:      &quot;/users&quot;,
+		Summary:   &quot;Create a user&quot;,
+		Tags:      []string{&quot;users&quot;},
+		Body:      User{},
+		Security:  []string{&quot;bearer&quot;},
+		Responses: map[int]any{fiber.StatusCreated: User{}},
+		Handler: func(c fiber.Ctx) error {
+			var u User
+			if err := xttp.Bind(c, &amp;u); err != nil {
+				return err
+			}
+			if u.Name == &quot;&quot; || u.Email == &quot;&quot; {
+				return ErrInvalid.With(&quot;name and email are required&quot;, nil)
+			}
+			u.ID = 1
+			if err := submit(c.Context(), WelcomeJob{Email: u.Email}); err != nil {
+				return err
+			}
+			return c.Status(fiber.StatusCreated).JSON(u)
+		},
+	}}
+}</code></pre>
+<pre><code class="language-go">func TestCreate(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		status int
+		jobs   int
+	}{
+		{&quot;valid&quot;, `{&quot;name&quot;:&quot;Ada&quot;,&quot;email&quot;:&quot;ada@example.com&quot;}`, 201, 1},
+		{&quot;missing email&quot;, `{&quot;name&quot;:&quot;Ada&quot;}`, 400, 0},
+		{&quot;not json&quot;, `nope`, 400, 0},
+		{&quot;unknown field&quot;, `{&quot;name&quot;:&quot;A&quot;,&quot;email&quot;:&quot;a@b.c&quot;,&quot;admin&quot;:true}`, 400, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jobs := 0
+			api := xttp.New(xttp.Config{SecuritySchemes: map[string]any{&quot;bearer&quot;: map[string]any{&quot;type&quot;: &quot;http&quot;, &quot;scheme&quot;: &quot;bearer&quot;}}})
+			api.Group(&quot;/v1&quot;).Add(Routes(func(context.Context, WelcomeJob) error { jobs++; return nil })...)
+
+			req := httptest.NewRequest(&quot;POST&quot;, &quot;/v1/users&quot;, strings.NewReader(tt.body))
+			req.Header.Set(&quot;Content-Type&quot;, &quot;application/json&quot;)
+			resp, err := api.App().Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tt.status || jobs != tt.jobs {
+				t.Fatalf(&quot;got status %d, jobs %d; want %d, %d&quot;, resp.StatusCode, jobs, tt.status, tt.jobs)
+			}
+		})
+	}
+}</code></pre>
+
+<h2 id="ship">4. Ship it</h2>
+<pre><code class="language-sh">make check                      # vet, race tests, lint, security, vuln, trivy, gitleaks
+make docker &amp;&amp; make docker-run  # hardened image on 127.0.0.1:8080
+go build -tags libgo_envy_slim -ldflags &quot;-X main.version=1.2.3&quot; ./example</code></pre>
+<p>What you get for free from the hardened profile: request ID, slog access log, panic recovery, strict helmet headers and <code>Cache-Control: no-store</code> on every response, no <code>Server</code> banner, per-IP rate limit, 1 MiB body limit, timeouts, dual-stack listener, Kubernetes probes, JSON:API errors, 415 on non-JSON bodies, constant-time bearer auth.</p>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

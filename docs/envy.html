@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>envy · libgo</title>
+<meta name="description" content="envy: load environment variables and an optional .env file into a tagged Go struct.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html" aria-current="page">envy</a><a href="climd.html">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>envy</h1>
+<p class="lead">Reflection-based environment variable loader with optional <code>.env</code> support. Struct tags are the whole configuration.</p>
+<ul class="features">
+<li><strong>Zero config</strong>: <code>env</code>, <code>default</code> and <code>required</code> struct tags</li>
+<li><strong>Types</strong>: <code>string</code>, <code>int</code>, <code>uint</code>, <code>bool</code>, <code>float</code> and slices (<code>[]string</code>, <code>[]int</code>, comma separated)</li>
+<li><strong>Nested structs</strong>, embedded or named, parsed recursively</li>
+<li><strong>Optional .env</strong>: loaded when present; compiled out with a build tag for production</li>
+</ul>
+
+<h2 id="install">Install</h2>
+<pre><code class="language-sh">go get github.com/moeghifar/libgo/pkg/envy</code></pre>
+
+<h2 id="quick-start">Quick start</h2>
+<pre><code class="language-go">package main
+
+import (
+	&quot;log&quot;
+
+	&quot;github.com/moeghifar/libgo/pkg/envy&quot;
+)
+
+type Config struct {
+	AppPort int    `env:&quot;APP_PORT&quot; default:&quot;8080&quot;`
+	Debug   bool   `env:&quot;DEBUG&quot; default:&quot;false&quot;`
+	APIKey  string `env:&quot;API_KEY&quot; required:&quot;true&quot;`
+
+	// Slices are comma separated in the environment.
+	AllowedHosts []string `env:&quot;ALLOWED_HOSTS&quot; default:&quot;localhost&quot;`
+
+	// Nested structs are parsed recursively.
+	Database struct {
+		DSN string `env:&quot;DB_DSN&quot;`
+	}
+}
+
+func main() {
+	var cfg Config
+	// default tags, then .env (if present), then the environment.
+	if err := envy.Load(&amp;cfg); err != nil {
+		log.Fatalf(&quot;config: %v&quot;, err)
+	}
+	log.Printf(&quot;listening on :%d&quot;, cfg.AppPort)
+}</code></pre>
+
+<h2 id="api">API</h2>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>func Load(target any) error</code></td><td>Fills <code>target</code> from <code>default:</code> tags, then the <code>.env</code> file (if available), then the environment. A <code>required:"true"</code> field left empty is an error.</td></tr>
+<tr><td><code>func Defaults(target any) error</code></td><td>Applies only the <code>default:</code> tags. No <code>.env</code>, no environment, <code>required</code> ignored. <code>Load</code> runs it first.</td></tr>
+</table>
+<table>
+<tr><th>Tag</th><th>Meaning</th></tr>
+<tr><td><code>env:"NAME"</code></td><td>Environment variable to read</td></tr>
+<tr><td><code>default:"v"</code></td><td>Value when the variable is unset</td></tr>
+<tr><td><code>required:"true"</code></td><td><code>Load</code> fails if the field ends up empty. A required field that falls back to its default is reported through <code>slog.Default().Warn</code>.</td></tr>
+</table>
+
+<h2 id="per-command">Real usage: one config per command</h2>
+<p>From <code>example/config.go</code>: a shared <code>Log</code> struct is embedded in each command's config, so <code>migrate</code> runs without server settings and <code>serve</code> without a database.</p>
+<pre><code class="language-go">// Log is shared by every command.
+type Log struct {
+	Level string `env:&quot;LOG_LEVEL&quot; default:&quot;INFO&quot;`
+}
+
+// ServeConfig is the serve command&#x27;s environment.
+type ServeConfig struct {
+	Log
+	APITokens  []string `env:&quot;API_TOKENS&quot; required:&quot;true&quot;`
+	Addr       string   `env:&quot;APP_ADDR&quot; default:&quot;127.0.0.1:8080&quot;`
+	RateLimit  int      `env:&quot;RATE_LIMIT&quot; default:&quot;100&quot;`
+	Docs       bool     `env:&quot;DOCS_ENABLED&quot; default:&quot;false&quot;`
+	TrustProxy bool     `env:&quot;TRUST_PROXY&quot; default:&quot;false&quot;`
+}
+
+// MigrateConfig is the migrate command&#x27;s environment.
+type MigrateConfig struct {
+	Log
+	DSN string `env:&quot;DB_DSN&quot; required:&quot;true&quot;`
+}</code></pre>
+<p>The matching <code>.env.example</code>:</p>
+<pre><code class="language-sh">LOG_LEVEL=INFO
+APP_ADDR=127.0.0.1:8080
+# Required by serve. Comma-separated; generate with: openssl rand -hex 32
+API_TOKENS=
+RATE_LIMIT=100
+DOCS_ENABLED=false
+TRUST_PROXY=false
+# Required by migrate only.
+DB_DSN=</code></pre>
+
+<h2 id="slim">Build without .env support</h2>
+<p>By default the package imports <code>github.com/joho/godotenv</code>. In Docker or Kubernetes, where only the real environment matters, drop it (about 600 KB of binary) with a build tag:</p>
+<pre><code class="language-sh">go build -o app .                         # development: reads .env
+go build -tags libgo_envy_slim -o app .   # production: environment only</code></pre>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

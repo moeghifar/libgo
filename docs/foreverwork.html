@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>foreverwork · libgo</title>
+<meta name="description" content="foreverwork: typed Go worker pools and tickers with timeouts, panic recovery and graceful shutdown.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html">climd</a><a href="foreverwork.html" aria-current="page">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>foreverwork</h1>
+<p class="lead">Long-lived worker pools: one pool per job type, each with its own goroutines, queue, per-job timeout and typed handler. No polling: a worker blocks on its channel and wakes the moment a job is queued. Standard library only.</p>
+<ul class="features">
+<li>One typed pool per job type: <code>Submit</code> takes your struct, a wrong type is a compile error</li>
+<li>The goroutine count is the concurrency limit; the buffered queue is the backpressure</li>
+<li>A timeout on every job: zero means a default, never "no deadline"</li>
+<li>Panic recovery with the stack kept, an <code>OnPanic</code> hook and a <code>*PanicError</code> you can <code>errors.As</code></li>
+<li>Graceful shutdown with one budget: in-flight jobs keep a live context, then are cancelled; optional queue drain</li>
+<li>Cancellation causes (<code>ErrJobTimeout</code>, <code>ErrShutdown</code>) tell the pool's ceiling apart from your dependency's timeout</li>
+<li><code>Every</code>: a ticker that cannot overlap itself and survives a panic</li>
+</ul>
+<p>What it deliberately does not do: databases, batching, retries, deduplication. A pool is not a durable queue; resumable state belongs in your tables.</p>
+
+<h2 id="install">Install</h2>
+<pre><code class="language-sh">go get github.com/moeghifar/libgo/pkg/foreverwork</code></pre>
+
+<h2 id="quick-start">Quick start</h2>
+<pre><code class="language-go">package main
+
+import (
+	&quot;context&quot;
+	&quot;os/signal&quot;
+	&quot;syscall&quot;
+	&quot;time&quot;
+
+	&quot;github.com/moeghifar/libgo/pkg/foreverwork&quot;
+)
+
+type EmailJob struct{ To string }
+type ReportJob struct{ ID int }
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	wp := foreverwork.New()
+	wp.OnResult = func(r foreverwork.Result) {
+		// r.Pool, r.Job, r.Duration, r.Err, r.Cause: metrics, slow-job alerts
+	}
+
+	email := foreverwork.Register(wp,
+		foreverwork.Config{Name: &quot;email&quot;, Workers: 4, QueueSize: 100, Timeout: 10 * time.Second},
+		func(ctx context.Context, j EmailJob) error { return send(ctx, j) })
+
+	report := foreverwork.Register(wp,
+		foreverwork.Config{Name: &quot;report&quot;, Workers: 2, QueueSize: 20, Timeout: time.Minute},
+		svc.Handle) // a method on your own struct works too
+	report.Describe = func(j ReportJob) []any { return []any{&quot;report_id&quot;, j.ID} }
+
+	go foreverwork.Every(ctx, foreverwork.EveryConfig{
+		Name: &quot;sweep&quot;, Interval: 30 * time.Second, Timeout: 20 * time.Second,
+	}, sweep)
+
+	done := make(chan struct{})
+	go func() { wp.Run(ctx); close(done) }()
+
+	if err := email.Submit(ctx, EmailJob{To: &quot;a@b.c&quot;}); err != nil {
+		// ctx.Err() if the caller gave up, foreverwork.ErrStopped if the pool is shutting down
+	}
+
+	&lt;-ctx.Done() // SIGTERM
+	&lt;-done       // Run returns once in-flight jobs finish, or the grace ran out
+}</code></pre>
+<p>Register every pool before <code>Run</code>; <code>Register</code> after <code>Run</code>, or a second <code>Run</code>, panics.</p>
+
+<h2 id="api">API</h2>
+<pre><code class="language-go">func New() *WorkerPool
+func Register[T any](wp *WorkerPool, cfg Config, h Handler[T]) *Worker[T]
+func Every(ctx context.Context, cfg EveryConfig, fn func(context.Context) error)
+
+type Handler[T any] func(ctx context.Context, job T) error
+
+func (wp *WorkerPool) Run(ctx context.Context)
+func (w *Worker[T]) Submit(ctx context.Context, job T) error
+func (w *Worker[T]) Queued() int
+func (w *Worker[T]) Name() string
+
+const DefaultTimeout       = 5 * time.Minute
+const DefaultShutdownGrace = 20 * time.Second
+var ErrJobTimeout, ErrShutdown, ErrStopped error</code></pre>
+<h3>Config (one pool)</h3>
+<table>
+<tr><th>Field</th><th>Meaning</th><th>Default</th></tr>
+<tr><td><code>Name</code></td><td>On every log line and in <code>Result</code></td><td><code>"worker"</code></td></tr>
+<tr><td><code>Workers</code></td><td>Goroutines = jobs running at once</td><td><code>1</code></td></tr>
+<tr><td><code>QueueSize</code></td><td>Jobs allowed to wait. <code>Submit</code> blocks when full; keep it small</td><td><code>1</code></td></tr>
+<tr><td><code>Timeout</code></td><td>Deadline for one job</td><td><code>DefaultTimeout</code> (5m)</td></tr>
+</table>
+<h3>WorkerPool fields (set before Run)</h3>
+<table>
+<tr><th>Field</th><th>Meaning</th><th>Default</th></tr>
+<tr><td><code>Logger</code></td><td><code>*slog.Logger</code> for the pool's lines</td><td><code>slog.Default()</code></td></tr>
+<tr><td><code>OnResult</code></td><td>Called after every job; concurrent, synchronous, panics recovered</td><td>none</td></tr>
+<tr><td><code>OnPanic</code></td><td>Called with each recovered handler panic, after it is logged</td><td>none</td></tr>
+<tr><td><code>DisableStackTrace</code></td><td>Leave the stack out of the panic log line</td><td>stack logged</td></tr>
+<tr><td><code>ShutdownGrace</code></td><td>The whole shutdown budget</td><td>20s</td></tr>
+<tr><td><code>DrainQueue</code></td><td>Finish queued jobs on shutdown instead of dropping them</td><td><code>false</code></td></tr>
+</table>
+<p>Log lines never include the job payload. <code>Worker[T].Describe</code> adds the fields you choose. <code>Result.Job</code> always carries the whole job.</p>
+
+<h2 id="shutdown">Shutdown</h2>
+<p>Cancel the context you gave <code>Run</code>. Then:</p>
+<ol>
+<li><code>Submit</code> returns <code>ErrStopped</code> immediately, including a <code>Submit</code> blocked on a full queue.</li>
+<li>Jobs in flight keep an <strong>uncancelled</strong> context for <code>ShutdownGrace</code>, so a job that is nearly done can write its own outcome.</li>
+<li>If the grace runs out, their context is cancelled with cause <code>ErrShutdown</code>. <code>Run</code> returns when they notice.</li>
+<li>Queued jobs are dropped, or finished inside the same budget with <code>DrainQueue</code>. <code>Run</code> logs <code>dropped=N</code>.</li>
+</ol>
+<pre><code class="language-go">func handle(ctx context.Context, j Job) error {
+	// ...
+	if errors.Is(context.Cause(ctx), foreverwork.ErrShutdown) {
+		// save partial progress and give up
+	}
+	return nil
+}
+
+wp.OnPanic = func(ctx context.Context, p *foreverwork.PanicError) {
+	sentry.CaptureException(p) // p.Stack holds the panicking frames
+}</code></pre>
+
+<h2 id="real">Real usage: a pool behind an HTTP route</h2>
+<p>From <code>example/serve.go</code> and <code>example/internal/user</code>: the module depends on the pool only through a <code>func</code>, so its test passes a counter instead.</p>
+<pre><code class="language-go">// WelcomeJob is queued for every created user.
+type WelcomeJob struct{ Email string }
+
+// SendWelcome handles a WelcomeJob.
+func SendWelcome(ctx context.Context, _ WelcomeJob) error {
+	slog.InfoContext(ctx, &quot;welcome email sent&quot;)
+	return nil
+}
+
+// serve.go
+wp := foreverwork.New()
+welcome := foreverwork.Register(wp,
+	foreverwork.Config{Name: &quot;welcome&quot;, Workers: 2, QueueSize: 10, Timeout: 5 * time.Second},
+	user.SendWelcome)
+workers := make(chan struct{})
+go func() { wp.Run(ctx); close(workers) }()
+
+api := newAPI(cfg)
+api.Group(&quot;/v1&quot;, xttp.BearerTokens(cfg.APITokens...)).Add(user.Routes(welcome.Submit)...)
+
+err := api.Run(ctx, cfg.Addr) // drain the API first, so no request submits to a stopped pool
+cancel()
+&lt;-workers</code></pre>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

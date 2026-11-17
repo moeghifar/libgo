@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>climd · libgo</title>
+<meta name="description" content="climd: a lightweight Go CLI builder described by one struct, a Cobra alternative.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html" aria-current="page">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>climd</h1>
+<p class="lead">A command-line interface builder designed as a simpler alternative to Cobra. One <code>AppConfig</code> literal describes the whole app; stdlib only.</p>
+<ul class="features">
+<li>Commands, subcommands and flags from a single struct</li>
+<li><code>./cmd &lt;command&gt; --flag value --bool-flag</code> and <code>./cmd &lt;command&gt; &lt;subcommand&gt; [flags]</code></li>
+<li>Context-aware <code>Run</code> functions</li>
+<li>Built-in <code>--help</code> and <code>--version</code></li>
+<li><code>Default</code> command run when no arguments are given; otherwise help is printed</li>
+</ul>
+
+<h2 id="install">Install</h2>
+<pre><code class="language-sh">go get github.com/moeghifar/libgo/pkg/climd</code></pre>
+
+<h2 id="quick-start">Quick start</h2>
+<pre><code class="language-go">package main
+
+import (
+	&quot;context&quot;
+	&quot;fmt&quot;
+
+	&quot;github.com/moeghifar/libgo/pkg/climd&quot;
+)
+
+func main() {
+	climd.Execute(climd.AppConfig{
+		Name:        &quot;myapp&quot;,
+		Version:     &quot;1.0.0&quot;,
+		Description: &quot;A sample CLI application&quot;,
+		Default:     &quot;serve&quot;, // run with no arguments
+		Commands: []climd.Command{
+			{
+				Name:  &quot;serve&quot;,
+				Short: &quot;Start the server&quot;,
+				Flags: []climd.Flag{
+					{Name: &quot;http&quot;, Usage: &quot;HTTP modules (all, none, a,b)&quot;},
+					{Name: &quot;grpc&quot;, Usage: &quot;gRPC modules&quot;},
+				},
+				Run: func(ctx context.Context, args []string, flags map[string]string) error {
+					fmt.Printf(&quot;HTTP: %s, gRPC: %s\n&quot;, flags[&quot;http&quot;], flags[&quot;grpc&quot;])
+					return nil
+				},
+			},
+			{
+				Name:  &quot;db&quot;,
+				Short: &quot;Database operations&quot;,
+				SubCommands: []climd.SubCommand{
+					{Name: &quot;init&quot;, Short: &quot;Initialize the database&quot;,
+						Run: func(ctx context.Context, _ []string, _ map[string]string) error {
+							fmt.Println(&quot;init&quot;)
+							return nil
+						}},
+					{Name: &quot;create_sql&quot;, Short: &quot;Generate SQL files&quot;,
+						Flags: []climd.Flag{{Name: &quot;output&quot;, Short: &quot;o&quot;, Usage: &quot;Output directory&quot;}},
+						Run: func(ctx context.Context, _ []string, flags map[string]string) error {
+							fmt.Println(&quot;writing to&quot;, flags[&quot;output&quot;])
+							return nil
+						}},
+				},
+			},
+		},
+	})
+}</code></pre>
+<pre><code class="language-sh">./myapp serve --http=all --grpc=module1
+./myapp db init
+./myapp db create_sql --output=./migrations
+./myapp --help</code></pre>
+
+<h2 id="api">API</h2>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>func Execute(config AppConfig)</code></td><td>Runs the app with <code>os.Args</code></td></tr>
+<tr><td><code>func Run(config AppConfig, args []string) error</code></td><td>Runs with explicit arguments; returns the command's error (use it in tests)</td></tr>
+</table>
+<pre><code class="language-go">type AppConfig struct {
+	Name        string
+	Version     string
+	Description string
+	Commands    []Command
+	Default     string // command run when no arguments are given; empty prints help
+}
+
+type Command struct {
+	Name        string
+	Short       string
+	Long        string
+	Flags       []Flag
+	SubCommands []SubCommand
+	Run         func(ctx context.Context, args []string, flags map[string]string) error
+}
+
+type SubCommand struct {
+	Name  string
+	Short string
+	Long  string
+	Flags []Flag
+	Run   func(ctx context.Context, args []string, flags map[string]string) error
+}
+
+type Flag struct {
+	Name     string
+	Short    string
+	Value    string // default
+	Usage    string
+	Required bool
+}</code></pre>
+<p>A boolean flag (<code>--migrate</code> with no value) shows up as a key in <code>flags</code>; check it with <code>_, ok := flags["migrate"]</code>.</p>
+
+<h2 id="real">Real usage: typed config per command</h2>
+<p>From <code>example/main.go</code>: a generic <code>run</code> adapter loads the command's own config with <code>envy</code>, installs a signal context and calls the typed function. The <code>Run</code> signature stays the plain climd one.</p>
+<pre><code class="language-go">// run wires every command: config for that command, and a context
+// cancelled on SIGINT or SIGTERM.
+func run[C any](fn func(context.Context, C) error) func(context.Context, []string, map[string]string) error {
+	return func(ctx context.Context, _ []string, _ map[string]string) error {
+		var cfg C
+		if err := envy.Load(&amp;cfg); err != nil {
+			return fmt.Errorf(&quot;config: %w&quot;, err)
+		}
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return fn(ctx, cfg)
+	}
+}
+
+func main() {
+	climd.Execute(climd.AppConfig{
+		Name:        &quot;example&quot;,
+		Version:     version, // -ldflags &quot;-X main.version=1.2.3&quot;
+		Description: &quot;Reference libgo service&quot;,
+		Commands: []climd.Command{
+			{Name: &quot;serve&quot;, Short: &quot;Run the HTTP API and workers&quot;, Run: run(serve)},
+			{Name: &quot;migrate&quot;, Short: &quot;Run database migrations&quot;, Run: run(migrate)},
+		},
+	})
+}</code></pre>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

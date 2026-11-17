@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>libgo · libgo</title>
+<meta name="description" content="Small, independent Go packages: stdlib-first, lightweight, no magic.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html" aria-current="page">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<section class="hero">
+<h1>libgo</h1>
+<p class="lead">A toolset of small Go libraries by <a href="https://github.com/moeghifar">moeghifar</a>: lightweight, fast and clean. Each package under <code>pkg/</code> stands on its own, so you import only what you use, inside your own framework or directly.</p>
+<pre><code class="language-sh">go get github.com/moeghifar/libgo@latest</code></pre>
+<p class="muted">Requires Go 1.27.3 or later. Current release: <a href="changelog.html">v0.3.0</a>.</p>
+</section>
+
+<h2 id="philosophy">Philosophy</h2>
+<div class="grid three">
+<div class="card"><h3>Standard library first</h3><p>A third-party dependency must be justified in writing before it is added. <code>go.mod</code> has three direct dependencies for four packages; two of them are stdlib-only.</p></div>
+<div class="card"><h3>Lightweight is the product</h3><p>Binary size, allocation count and cold-start cost are features. Reflection runs at registration time, never in the hot path.</p></div>
+<div class="card"><h3>No magic</h3><p>No global state, no <code>init()</code> side effects, no builder chains. One plain struct literal describes the whole app. Errors are values.</p></div>
+</div>
+
+<h2 id="packages">Packages</h2>
+<div class="grid two">
+<a class="card link" href="envy.html"><h3>envy</h3><p>Environment variables and an optional <code>.env</code> file loaded into a tagged struct. Defaults, required fields, nested structs, slices.</p><span class="tag">godotenv, optional</span></a>
+<a class="card link" href="climd.html"><h3>climd</h3><p>Lightweight CLI builder, a Cobra alternative described by one struct. Commands, subcommands, flags, help and version built in.</p><span class="tag">stdlib only</span></a>
+<a class="card link" href="foreverwork.html"><h3>foreverwork</h3><p>Typed worker pools and tickers with per-job timeouts, panic recovery and graceful shutdown. No polling, no global state.</p><span class="tag">stdlib only</span></a>
+<a class="card link" href="xttp.html"><h3>xttp</h3><p>Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors and hardened production defaults. Handlers stay plain Fiber handlers.</p><span class="tag">Fiber v3</span></a>
+</div>
+
+<h2 id="planned">Planned</h2>
+<div class="grid two">
+<div class="card planned"><h3>xgrpc <span class="badge">planned</span></h3><p>The gRPC counterpart of xttp: mTLS required, size limits, timeouts, graceful stop, slog access log without payloads, and the same <code>*xttp.Error</code> model mapped to gRPC status codes.</p></div>
+<div class="card planned"><h3>slog extension <span class="badge">planned</span></h3><p>Small helpers around <code>log/slog</code> for the conventions the other packages already follow: JSON output, request-scoped attributes, no payloads in log lines.</p></div>
+</div>
+
+<h2 id="example">Full service</h2>
+<p>The <a href="getting-started.html">getting started</a> page walks through <code>example/</code>, the reference bootstrap: <code>envy</code> loads each command's config, <code>climd</code> parses the command, and <code>serve</code> runs a hardened <code>xttp</code> API that queues jobs on a <code>foreverwork</code> pool.</p>
+<pre><code class="language-sh">go run ./example serve
+curl -X POST localhost:8080/v1/users -H &#x27;Content-Type: application/json&#x27; \
+  -H &#x27;Authorization: Bearer &lt;token&gt;&#x27; -d &#x27;{&quot;name&quot;:&quot;Ada&quot;,&quot;email&quot;:&quot;ada@example.com&quot;}&#x27;</code></pre>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

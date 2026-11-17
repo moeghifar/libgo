@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog · libgo</title>
+<meta name="description" content="libgo release notes, generated from CHANGELOG.md.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html" aria-current="page">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>Changelog</h1>
+<p class="lead">Conventional commits, released with commit-and-tag-version. Source: <a href="https://github.com/moeghifar/libgo/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+<h2>0.3.0 (2026-11-05)</h2>
+<h3>⚠ BREAKING CHANGES</h3>
+<ul>
+<li><strong>xttp:</strong> a <code>required:"true"</code> query parameter on <code>Route.Query</code> is now enforced with a 400; it was documentation only</li>
+<li><strong>foreverwork:</strong> log lines no longer include the job payload; set <code>Worker[T].Describe</code> to log chosen fields</li>
+<li>Go 1.27.3 or later is required</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>xttp:</strong> <code>Bind</code> (strict JSON) and <code>BindQuery</code>, returning a 400 <code>*Error</code></li>
+<li><strong>xttp:</strong> <code>Config.MapError</code>, <code>CodeOf</code>, <code>IsCode</code></li>
+<li><strong>xttp:</strong> <code>Config.OnResponse</code>, called with the final status, also after a recovered panic and with <code>AccessLog</code> off</li>
+<li><strong>xttp:</strong> <code>Principal</code>, <code>SetPrincipal</code>, <code>PrincipalOf</code>, and constant-time <code>BearerTokens</code> and <code>APIKey</code> that refuse to start with no secrets</li>
+<li><strong>xttp:</strong> <code>Route.Security</code> and <code>Config.SecuritySchemes</code> in the OpenAPI document</li>
+<li><code>example/</code> is the hardened reference service: per-command config, JSON logs, shared signal context, version injection, token auth, a sample <code>internal/</code> module, <code>.env.example</code> and a hardened Dockerfile</li>
+<li>separate <code>make</code> commands for each check, plus <code>trivy</code> and <code>gitleaks</code> scans</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li><strong>security:</strong> update to Go 1.27.3 (GO-2026-6809) and patch <code>golang.org/x/net</code> and <code>golang.org/x/crypto</code> (GO-2026-6866, GO-2026-6860, GO-2026-5932); <code>x/crypto</code> is pinned to a pre-release commit until a tagged fix exists</li>
+<li><strong>deps:</strong> update <code>fiber/v3</code> to 3.6.1 and <code>fasthttp</code> to 1.77.0</li>
+</ul>
+<h2>0.2.0 (2026-10-19)</h2>
+<h3>Features</h3>
+<ul>
+<li><strong>xttp:</strong> security headers always on: helmet set plus <code>Cache-Control: no-store</code> on every response, also on 413/431 written before routing and on probes; no <code>Server</code> banner by default (<code>HideServerHeader</code>); <code>HelmetPreset: HelmetStrict</code> (deny-all CSP, <code>X-Frame-Options: DENY</code>, Permissions-Policy all off, preloaded HSTS on TLS); <code>Config.Helmet</code> overrides one field, <code>"-"</code> removes a header; <code>Config.Headers</code> for extra static headers</li>
+<li><strong>xttp:</strong> <code>StatusOf(err)</code> for middleware that needs the response status of a returned error</li>
+<li><strong>xttp:</strong> <code>ErrorDocument</code> / <code>ErrorObject</code> exported; error responses documented as <code>application/vnd.api+json</code>; <code>Config.DefaultErrors</code> adds them to every route</li>
+<li><strong>xttp:</strong> <code>required:"true|false"</code> tag on any struct field</li>
+<li><strong>xttp:</strong> <code>Config.Docs</code> (Enabled, Path, Page, Guard) and <code>Config.Profiling</code> (pprof behind a required Guard); the docs page carries its own CSP so it renders under <code>HelmetStrict</code></li>
+<li><strong>xttp:</strong> <code>Config.Logger</code>, <code>Config.AccessLog</code>, <code>(*API).ErrorHandler</code>: no package-level logger</li>
+<li><strong>xttp:</strong> <code>Config.RateLimitHeaders</code> (default off: no <code>X-RateLimit-*</code>) and <code>Config.StrictContentType</code> (415 for non-JSON bodies)</li>
+<li><strong>xttp:</strong> an empty <code>Route.Path</code> on a group registers the group prefix itself</li>
+<li><strong>xttp:</strong> <code>example/strict</code>, the hardened reference server for the VAPT checklist</li>
+<li><strong>envy:</strong> <code>Defaults(ptr)</code> applies only <code>default</code> tags; warnings go through <code>slog</code> instead of stdout</li>
+<li><strong>climd:</strong> <code>AppConfig.Default</code>, the command run without arguments</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li><strong>xttp:</strong> error responses were documented as <code>application/json</code> while sent as <code>application/vnd.api+json</code></li>
+<li><strong>xttp:</strong> request body fields were always required</li>
+<li><strong>xttp:</strong> <code>Run</code> listened on <code>tcp4</code> only; the default is now dual-stack <code>tcp</code> (set <code>Listen.ListenerNetwork</code> to keep IPv4 only)</li>
+<li><strong>xttp:</strong> pre-routing errors (413, 431) missed the security headers</li>
+</ul>
+<h3>Behaviour changes</h3>
+<ul>
+<li>every response now carries <code>Cache-Control: no-store</code> and the helmet headers, and no <code>Server</code> header; <code>Headers: {"Cache-Control": "-"}</code> or <code>HideServerHeader: &amp;f</code> restore v0.1.0</li>
+<li><code>X-RateLimit-*</code> headers are no longer sent unless <code>RateLimitHeaders: &amp;t</code></li>
+<li>a <code>Responses</code> entry ≥ 400 with a <code>nil</code> body is now documented as <code>ErrorDocument</code></li>
+<li>the listener accepts IPv6</li>
+</ul>
+<h2>0.1.0 (2026-10-18)</h2>
+<h3>Features</h3>
+<ul>
+<li>add foreverwork (<a href="https://github.com/moeghifar/libgo/commit/bd6e3f9d76e3ab0d25543750cf7f7429b7a4f5e2">bd6e3f9</a>)</li>
+<li>add new climd readme (<a href="https://github.com/moeghifar/libgo/commit/f5afbab3b3cba41943d822761d4e2bad5b1b01dd">f5afbab</a>)</li>
+<li>add xttp, Fiber v3 routes with OpenAPI 3.1, JSON:API errors and server defaults (<a href="https://github.com/moeghifar/libgo/commit/94deab311079785e70c55d1671575d87b1408ba0">94deab3</a>)</li>
+<li>climd as Cobra replacement (<a href="https://github.com/moeghifar/libgo/commit/55310176b49dcd7375637066248f54903c93a493">5531017</a>)</li>
+<li>initial setup for env (<a href="https://github.com/moeghifar/libgo/commit/34c2e0dfa732becd59d81020a3cd307827920f09">34c2e0d</a>)</li>
+<li>next gen with dotenv (<a href="https://github.com/moeghifar/libgo/commit/d888d8a4767bf77e66cbabb71439c9ee0b80cf42">d888d8a</a>)</li>
+</ul>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

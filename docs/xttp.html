@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xttp · libgo</title>
+<meta name="description" content="xttp: Fiber v3 routes with OpenAPI 3.1 generated from Go structs, JSON:API errors and hardened server defaults.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2300add8'/%3E%3Ctext x='16' y='22' font-size='16' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'%3Ego%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="site.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="top">
+  <button class="menu" aria-label="Toggle navigation" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <a class="brand" href="index.html">libgo</a>
+  <span class="grow"></span>
+  <a class="gh" href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a>
+  <button class="theme" aria-label="Toggle dark mode" onclick="toggleTheme()">◐</button>
+</header>
+<div class="shell">
+<nav class="side"><div class="nav-group">Overview</div><a href="index.html">libgo</a><a href="getting-started.html">Getting started</a><div class="nav-group">Packages</div><a href="envy.html">envy</a><a href="climd.html">climd</a><a href="foreverwork.html">foreverwork</a><a href="xttp.html" aria-current="page">xttp</a><div class="nav-group">Planned</div><a href="index.html#planned">xgrpc</a><a href="index.html#planned">slog extension</a><div class="nav-group">Project</div><a href="changelog.html">Changelog</a><a href="https://github.com/moeghifar/libgo" target="_blank" rel="noopener">GitHub</a></nav>
+<main class="content">
+
+<h1>xttp</h1>
+<p class="lead">Fiber v3 routes that also describe themselves as an OpenAPI 3.1 document. It looks like Huma from the outside, one struct per operation with OpenAPI from Go types, but it does not wrap your handler: handlers stay plain <code>fiber.Handler</code>.</p>
+<ul class="features">
+<li><strong>Production server by default</strong>: <code>xttp.New(Config)</code> builds the Fiber app with timeouts, body limit, rate limit, probes, request id, access log, recovery and security headers</li>
+<li><strong>Plain handlers</strong>: <code>func(c fiber.Ctx) error</code>, no input/output wrapper structs</li>
+<li><strong>Schemas from Go types</strong>: structs, pointers, slices, maps, <code>time.Time</code>, <code>[]byte</code>, embedded and recursive types; named structs become <code>components/schemas</code></li>
+<li><strong>Parameters</strong>: Fiber <code>:id</code> / <code>:id?</code> become path params; a <code>Query</code> struct's <code>query:"name"</code> fields become query params</li>
+<li><strong>JSON:API errors</strong> with no internal text on the wire; <code>Bind</code> / <code>BindQuery</code> return them as 400s</li>
+<li><strong>Auth helpers</strong>: constant-time <code>BearerTokens</code> and <code>APIKey</code>, <code>Principal</code>, documented via <code>Route.Security</code></li>
+<li><strong>Startup-only reflection</strong>; no YAML dependency</li>
+</ul>
+
+<h2 id="install">Install</h2>
+<pre><code class="language-sh">go get github.com/moeghifar/libgo/pkg/xttp github.com/gofiber/fiber/v3</code></pre>
+
+<h2 id="quick-start">Quick start</h2>
+<pre><code class="language-go">package main
+
+import (
+	&quot;context&quot;
+
+	&quot;github.com/gofiber/fiber/v3&quot;
+	&quot;github.com/moeghifar/libgo/pkg/xttp&quot;
+)
+
+type User struct {
+	ID    int    `json:&quot;id&quot;`
+	Name  string `json:&quot;name&quot; doc:&quot;Full name&quot;`
+	Email string `json:&quot;email,omitempty&quot;`
+}
+
+type ListUsers struct {
+	Page int    `query:&quot;page&quot; doc:&quot;Page number&quot;`
+	Sort string `query:&quot;sort&quot; required:&quot;true&quot;` // enforced: missing → 400
+}
+
+var ErrBadInput = xttp.Error{Status: 400, Code: &quot;USR-400&quot;, Title: &quot;Invalid input&quot;}
+
+func main() {
+	api := xttp.New(xttp.Config{
+		Info: xttp.Info{Title: &quot;Users&quot;, Version: &quot;1.0.0&quot;},
+		Docs: xttp.DocsConfig{Enabled: true}, // /docs, /docs/openapi.yaml, /docs/openapi.json
+	})
+	v1 := api.Group(&quot;/v1&quot;)
+
+	v1.Add(
+		xttp.Route{
+			Method:    fiber.MethodGet,
+			Path:      &quot;/users&quot;,
+			Summary:   &quot;List users&quot;,
+			Tags:      []string{&quot;users&quot;},
+			Query:     ListUsers{},
+			Responses: map[int]any{200: []User{}},
+			Handler: func(c fiber.Ctx) error {
+				var q ListUsers
+				if err := xttp.BindQuery(c, &amp;q); err != nil {
+					return err // already a 400 *xttp.Error
+				}
+				return c.JSON([]User{})
+			},
+		},
+		xttp.Route{
+			Method:    fiber.MethodPost,
+			Path:      &quot;/users&quot;,
+			Summary:   &quot;Create a user&quot;,
+			Tags:      []string{&quot;users&quot;},
+			Body:      User{},
+			Responses: map[int]any{201: User{}},
+			Handler: func(c fiber.Ctx) error {
+				var u User
+				if err := xttp.Bind(c, &amp;u); err != nil { // strict JSON: unknown fields → 400
+					return err
+				}
+				return c.Status(fiber.StatusCreated).JSON(u)
+			},
+		},
+	)
+
+	api.Run(context.Background(), &quot;:3000&quot;) // graceful stop on SIGINT/SIGTERM
+}</code></pre>
+<p>Export the spec without a server, for CI or a committed file:</p>
+<pre><code class="language-go">os.WriteFile(&quot;openapi.yaml&quot;, api.YAML(), 0o644)</code></pre>
+
+<h2 id="api">API</h2>
+<pre><code class="language-go">func New(cfg Config) *API
+func (a *API) Add(routes ...Route)
+func (a *API) Group(prefix string, middlewares ...fiber.Handler) *API
+func (a *API) Run(ctx context.Context, addr string) error
+func (a *API) App() *fiber.App
+func (a *API) Docs(path string)
+func (a *API) YAML() []byte
+func (a *API) JSON() []byte
+func (a *API) Spec() map[string]any
+func (a *API) ErrorHandler(c fiber.Ctx, err error) error
+
+// binding and errors
+func Bind(c fiber.Ctx, in any) error
+func BindQuery(c fiber.Ctx, q any) error
+func (e Error) With(detail string, err error) *Error
+func StatusOf(err error) int
+func CodeOf(err error) string
+func IsCode(err error, code string) bool
+
+// auth
+func BearerTokens(tokens ...string) fiber.Handler
+func APIKey(header string, keys ...string) fiber.Handler
+func SetPrincipal(c fiber.Ctx, p Principal)
+func PrincipalOf(c fiber.Ctx) (Principal, bool)</code></pre>
+<pre><code class="language-go">type Route struct {
+	Method      string // fiber.MethodGet, ...
+	Path        string // Fiber syntax: &quot;/users/:id&quot;; &quot;:id?&quot; marks an optional param
+	Summary     string
+	Description string
+	OperationID string
+	Tags        []string
+	Deprecated  bool
+
+	Query     any           // struct with query:&quot;name&quot; fields
+	Body      any           // request body type
+	Responses map[int]any   // status → body type; ≥400 with nil → ErrorDocument
+	Security  []string      // names from Config.SecuritySchemes
+
+	Handler     fiber.Handler
+	Middlewares []fiber.Handler // run before Handler, on this route only
+}
+
+type Error struct {
+	Status int            // HTTP status
+	Code   string         // application-specific code, e.g. &quot;USR-404&quot;
+	Title  string         // short summary, the same for every occurrence
+	Detail string         // explanation of this occurrence, shown to the client
+	Source *ErrorSource   // what caused it in the request
+	Meta   map[string]any
+	Err    error          // internal cause: logged, never sent to the client
+}</code></pre>
+
+<h3 id="config">Config and server defaults</h3>
+<p>Every field is optional; zero means the default.</p>
+<table>
+<tr><th>Setting</th><th>Default</th><th>Change it</th></tr>
+<tr><td>Read / write / idle timeout</td><td>10s / 30s / 120s</td><td><code>Fiber.ReadTimeout</code> etc.; negative = off</td></tr>
+<tr><td>Body limit</td><td>1 MiB (413 above)</td><td><code>Fiber.BodyLimit</code></td></tr>
+<tr><td>Rate limit</td><td>100 req/s per client IP, 429 JSON:API</td><td><code>RateLimit: n</code>; <code>-1</code> = off; behind a proxy set <code>Fiber.TrustProxy</code></td></tr>
+<tr><td>CORS</td><td>off</td><td><code>CORS: &amp;cors.Config{...}</code></td></tr>
+<tr><td>Probes</td><td><code>/livez</code>, <code>/readyz</code>, <code>/startupz</code> → 200 / 503</td><td><code>Health{Live, Ready, Startup func(fiber.Ctx) bool}</code></td></tr>
+<tr><td>Request ID</td><td><code>X-Request-ID</code>, sanitised</td><td>—</td></tr>
+<tr><td>Helmet</td><td>always on + <code>Cache-Control: no-store</code>, no <code>Server</code> header</td><td><code>HelmetPreset: xttp.HelmetStrict</code>; <code>Helmet</code> overrides one field, <code>"-"</code> removes a header</td></tr>
+<tr><td>Docs</td><td>off</td><td><code>Docs: DocsConfig{Enabled: true, Path, Page, Guard}</code></td></tr>
+<tr><td>Profiling</td><td>off</td><td><code>Profiling: ProfilingConfig{Enabled: true, Guard: ...}</code>; a Guard is required</td></tr>
+<tr><td>Logger / AccessLog</td><td><code>slog.Default()</code>, one line per request</td><td><code>Logger</code>, <code>AccessLog: &amp;f</code></td></tr>
+<tr><td>StrictContentType</td><td>off</td><td><code>true</code>: non-JSON body → 415 before any handler</td></tr>
+<tr><td>DefaultErrors</td><td>none</td><td><code>[]int{400, 404, 500}</code> documents <code>ErrorDocument</code> on every route</td></tr>
+<tr><td>MapError / OnResponse</td><td>none</td><td>map your own errors to <code>*Error</code>; observe the final status of every request</td></tr>
+<tr><td>Shutdown</td><td>ctx done, SIGINT or SIGTERM; <code>/readyz</code> → 503; waits 10s</td><td><code>Listen.ShutdownTimeout</code>; TLS via <code>Listen.CertFile</code></td></tr>
+</table>
+<p>Middleware order: probes → request id → access log → recover → security headers → CORS → rate limit → pprof → content-type check → docs → your routes.</p>
+
+<h2 id="errors">Errors (JSON:API)</h2>
+<p>Every error leaves as a JSON:API error document, <code>Content-Type: application/vnd.api+json</code>. <code>With</code> returns a copy; only <code>*Error</code> is an <code>error</code>, so a shared value cannot be mutated by accident.</p>
+<pre><code class="language-go">var ErrUserNotFound = xttp.Error{Status: 404, Code: &quot;USR-404&quot;, Title: &quot;User not found&quot;}
+
+func getUser(c fiber.Ctx) error {
+	u, err := repo.Find(c.Params(&quot;id&quot;))
+	if err != nil {
+		return ErrUserNotFound.With(&quot;no user with id &quot;+c.Params(&quot;id&quot;), err) // err is logged, never sent
+	}
+	return c.JSON(u)
+}</code></pre>
+<pre><code class="language-json">{&quot;errors&quot;:[{&quot;id&quot;:&quot;&lt;request id&gt;&quot;,&quot;status&quot;:&quot;404&quot;,&quot;code&quot;:&quot;USR-404&quot;,&quot;title&quot;:&quot;User not found&quot;,&quot;detail&quot;:&quot;no user with id 42&quot;}]}</code></pre>
+<ul>
+<li><code>xttp.Errors{...}</code> sends several at once (validation)</li>
+<li>Fiber errors (404, 405, 413) keep their status; any other error is a 500 with no internal text, logged with slog</li>
+<li>Cleanup on shutdown: <code>api.App().Hooks().OnPostShutdown(func(err error) error { return db.Close() })</code>, idempotent</li>
+</ul>
+
+<h2 id="real">Real usage: the hardened server from example/</h2>
+<pre><code class="language-go">// newAPI is the hardened server every service starts from.
+func newAPI(cfg ServeConfig) *xttp.API {
+	return xttp.New(xttp.Config{
+		Info:              xttp.Info{Title: &quot;Example&quot;, Version: version},
+		Fiber:             fiber.Config{TrustProxy: cfg.TrustProxy},
+		HelmetPreset:      xttp.HelmetStrict,
+		StrictContentType: true,
+		RateLimit:         cfg.RateLimit,
+		DefaultErrors:     []int{400, 401, 404, 415, 429, 500},
+		SecuritySchemes:   map[string]any{&quot;bearer&quot;: map[string]any{&quot;type&quot;: &quot;http&quot;, &quot;scheme&quot;: &quot;bearer&quot;}},
+		Docs:              xttp.DocsConfig{Enabled: cfg.Docs},
+		Listen:            fiber.ListenConfig{DisableStartupMessage: true},
+	})
+}
+
+// a protected group: constant-time token check, documented as &quot;bearer&quot;
+api.Group(&quot;/v1&quot;, xttp.BearerTokens(cfg.APITokens...)).Add(user.Routes(welcome.Submit)...)</code></pre>
+<p>And a route in <code>example/internal/user/user.go</code> that binds strictly, returns a typed error, and queues a job:</p>
+<pre><code class="language-go">var ErrInvalid = xttp.Error{Status: fiber.StatusBadRequest, Code: &quot;USR-400&quot;, Title: &quot;Invalid user&quot;}
+
+func Routes(submit func(context.Context, WelcomeJob) error) []xttp.Route {
+	return []xttp.Route{{
+		Method:    fiber.MethodPost,
+		Path:      &quot;/users&quot;,
+		Summary:   &quot;Create a user&quot;,
+		Tags:      []string{&quot;users&quot;},
+		Body:      User{},
+		Security:  []string{&quot;bearer&quot;},
+		Responses: map[int]any{fiber.StatusCreated: User{}},
+		Handler: func(c fiber.Ctx) error {
+			var u User
+			if err := xttp.Bind(c, &amp;u); err != nil {
+				return err
+			}
+			if u.Name == &quot;&quot; || u.Email == &quot;&quot; {
+				return ErrInvalid.With(&quot;name and email are required&quot;, nil)
+			}
+			u.ID = 1
+			if err := submit(c.Context(), WelcomeJob{Email: u.Email}); err != nil {
+				return err // pool shutting down: a 500, logged, details hidden
+			}
+			return c.Status(fiber.StatusCreated).JSON(u)
+		},
+	}}
+}</code></pre>
+<p>Testing a route needs no network: <code>api.App().Test(httptest.NewRequest(...))</code>.</p>
+
+<h2 id="tags">Struct tags</h2>
+<table>
+<tr><th>Tag</th><th>Where</th><th>Meaning</th></tr>
+<tr><td><code>json</code></td><td>body / response</td><td>property name, <code>-</code>, <code>omitempty</code>, <code>omitzero</code> (optional); everything else required</td></tr>
+<tr><td><code>doc</code></td><td>any field</td><td>description</td></tr>
+<tr><td><code>query</code></td><td><code>Query</code> struct</td><td>query parameter name (the tag Fiber binds)</td></tr>
+<tr><td><code>required</code></td><td>any field</td><td><code>"true"</code> / <code>"false"</code> overrides the default; a required query param is enforced with a 400</td></tr>
+</table>
+
+<footer>moeghifar/libgo · Apache 2.0 · <a href="https://github.com/moeghifar/libgo">source</a></footer>
+</main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script src="site.js"></script>
+</body>
+</html>

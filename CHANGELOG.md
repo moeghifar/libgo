@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.4.1 (2026-11-17)
+
+
+### Bug Fixes
+
+* **deps:** require go 1.27.4 for GO-2026-6859 (net/http); bump fiber v3.7.0, fasthttp v1.79.0, golang.org/x/crypto v0.59.0, x/sys, x/text
+
+
 ## 0.4.0 (2026-11-10)
 
 

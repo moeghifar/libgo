@@ -77,6 +77,8 @@ func (h *DevHandler) WithGroup(name string) slog.Handler {
 	return &c
 }
 
+var bufPool = sync.Pool{New: func() any { b := make([]byte, 0, 512); return &b }}
+
 const (
 	ansiReset = "\x1b[0m"
 	ansiDim   = "\x1b[2m"
@@ -88,6 +90,8 @@ func levelColor(l slog.Level) string {
 		return "\x1b[31m" // red
 	case l >= slog.LevelWarn:
 		return "\x1b[33m" // yellow
+	case l == LevelNotice:
+		return "\x1b[35m" // magenta
 	case l >= slog.LevelInfo:
 		return "\x1b[32m" // green
 	}
@@ -96,7 +100,14 @@ func levelColor(l slog.Level) string {
 
 // Handle formats r as one line and writes it under the handler's lock.
 func (h *DevHandler) Handle(_ context.Context, r slog.Record) error {
-	var b []byte
+	bp := bufPool.Get().(*[]byte)
+	b := (*bp)[:0]
+	defer func() {
+		if cap(b) <= 16<<10 { // ponytail: drop huge buffers instead of pinning them
+			*bp = b
+			bufPool.Put(bp)
+		}
+	}()
 	if !r.Time.IsZero() {
 		if h.opts.Color {
 			b = append(b, ansiDim...)
@@ -110,7 +121,11 @@ func (h *DevHandler) Handle(_ context.Context, r slog.Record) error {
 	if h.opts.Color {
 		b = append(b, levelColor(r.Level)...)
 	}
-	b = fmt.Appendf(b, "%-5s", r.Level.String())
+	name := LevelName(r.Level)
+	b = append(b, name...)
+	for i := len(name); i < 5; i++ {
+		b = append(b, ' ')
+	}
 	if h.opts.Color {
 		b = append(b, ansiReset...)
 	}
@@ -118,7 +133,8 @@ func (h *DevHandler) Handle(_ context.Context, r slog.Record) error {
 	b = appendText(b, r.Message)
 	if h.opts.AddSource && r.PC != 0 {
 		if s := r.Source(); s != nil {
-			b = fmt.Appendf(b, " %s:%d", filepath.Base(s.File), s.Line)
+			b = append(append(append(b, ' '), filepath.Base(s.File)...), ':')
+			b = strconv.AppendInt(b, int64(s.Line), 10)
 		}
 	}
 	b = append(b, h.prefix...)
@@ -179,6 +195,14 @@ func appendValue(b []byte, v slog.Value) []byte {
 	switch v.Kind() {
 	case slog.KindString:
 		return appendString(b, v.String())
+	case slog.KindInt64:
+		return strconv.AppendInt(b, v.Int64(), 10)
+	case slog.KindUint64:
+		return strconv.AppendUint(b, v.Uint64(), 10)
+	case slog.KindFloat64:
+		return strconv.AppendFloat(b, v.Float64(), 'g', -1, 64)
+	case slog.KindBool:
+		return strconv.AppendBool(b, v.Bool())
 	case slog.KindTime:
 		return v.Time().AppendFormat(b, time.RFC3339Nano)
 	case slog.KindAny:

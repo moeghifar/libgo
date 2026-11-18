@@ -1,17 +1,22 @@
 # climd
 
-`climd` is a lightweight command-line interface builder designed as a simpler alternative to Cobra with minimal setup overhead. Optimized for speed and small binary size.
+Command-line apps described by one struct: a small alternative to Cobra.
+
+The whole CLI (commands, subcommands, flags and handlers) is one `AppConfig` literal. There is no code generation, no global registry and no `init()` wiring. Standard library only.
+
+```sh
+go get github.com/moeghifar/libgo/pkg/climd
+```
 
 ## Features
 
-- Single array setup with struct initialization
-- Support for flags: `./cmd <command> --param1 <val1> <val2> <val3> --param2 --param3 <val1>`
-- Support for subcommands: `./cmd <command> <subcommand> [flags]`
-- Context-aware execution
-- Built-in help and version flags
-- Default command: `AppConfig{Default: "serve"}` runs `serve` when no arguments are given (otherwise help is printed)
-- Minimal dependencies
-- Small binary footprint
+- **One struct:** `AppConfig{Commands: []Command{...}}` describes the entire app.
+- **Commands and subcommands:** `app serve`, `app db migrate`.
+- **Flags:** long (`--output dir`) and short (`-o dir`), with values or as booleans (`--verbose`).
+- **Required flags:** a missing `Required` flag is an error naming it.
+- **Default command:** `AppConfig{Default: "serve"}` runs `serve` when no arguments are given.
+- **Built-in help and version:** `--help`/`-h` and `--version`/`-v`, generated from the struct.
+- **Testable:** `Run(cfg, args)` returns the error; `Execute(cfg)` is the `main` wrapper that prints it and exits 1.
 
 ## Usage
 
@@ -19,139 +24,84 @@
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    "strings"
-    
-    "github.com/moeghifar/libgo/pkg/climd"
+	"context"
+	"fmt"
+
+	"github.com/moeghifar/libgo/pkg/climd"
 )
 
 func main() {
-    config := climd.AppConfig{
-        Name:        "myapp",
-        Version:     "1.0.0",
-        Description: "A sample CLI application",
-        Commands: []climd.Command{
-            {
-                Name:  "serve",
-                Short: "Start the server with specified services",
-                Long:  "This command starts the server with HTTP, gRPC, and consumer services",
-                Flags: []climd.Flag{
-                    {
-                        Name:  "http",
-                        Usage: "HTTP service configuration (e.g., all, none, specific)",
-                    },
-                    {
-                        Name:  "grpc",
-                        Usage: "gRPC service modules (e.g., module1,module2)",
-                    },
-                    {
-                        Name:  "consumer",
-                        Usage: "Consumer service modules (e.g., module1,module2)",
-                    },
-                },
-                Run: func(ctx context.Context, args []string, flags map[string]string) error {
-                    http := flags["http"]
-                    grpc := flags["grpc"]
-                    consumer := flags["consumer"]
-                    
-                    fmt.Printf("Starting server...\n")
-                    fmt.Printf("HTTP: %s\n", http)
-                    fmt.Printf("gRPC: %s\n", grpc)
-                    fmt.Printf("Consumer: %s\n", consumer)
-                    
-                    return nil
-                },
-            },
-            {
-                Name:  "exec",
-                Short: "Execute specific operations",
-                Long:  "This command executes specific operations like migrations",
-                Flags: []climd.Flag{
-                    {
-                        Name:  "migrate-old-user",
-                        Usage: "Migrate old user data",
-                    },
-                    {
-                        Name:  "migrate-old-transactions",
-                        Usage: "Migrate old transaction data",
-                    },
-                },
-                Run: func(ctx context.Context, args []string, flags map[string]string) error {
-                    if _, ok := flags["migrate-old-user"]; ok {
-                        fmt.Println("Migrating old user data...")
-                    }
-                    if _, ok := flags["migrate-old-transactions"]; ok {
-                        fmt.Println("Migrating old transaction data...")
-                    }
-                    
-                    return nil
-                },
-            },
-            {
-                Name:  "db",
-                Short: "Database operations",
-                Long:  "This command handles database operations like init, migrate, etc.",
-                SubCommands: []climd.SubCommand{
-                    {
-                        Name:  "init",
-                        Short: "Initialize the database",
-                        Run: func(ctx context.Context, args []string, flags map[string]string) error {
-                            fmt.Println("Initializing database...")
-                            return nil
-                        },
-                    },
-                    {
-                        Name:  "migrate",
-                        Short: "Run database migrations",
-                        Run: func(ctx context.Context, args []string, flags map[string]string) error {
-                            fmt.Println("Running database migrations...")
-                            return nil
-                        },
-                    },
-                    {
-                        Name:  "create_sql",
-                        Short: "Generate SQL files",
-                        Flags: []climd.Flag{
-                            {
-                                Name:  "output",
-                                Short: "o",
-                                Usage: "Output directory for SQL files",
-                            },
-                        },
-                        Run: func(ctx context.Context, args []string, flags map[string]string) error {
-                            output := flags["output"]
-                            if output == "" {
-                                output = "./sql"
-                            }
-                            fmt.Printf("Creating SQL files in %s...\n", output)
-                            return nil
-                        },
-                    },
-                },
-            },
-        },
-    }
-    
-    climd.Execute(config)
+	climd.Execute(climd.AppConfig{
+		Name:        "myapp",
+		Version:     "1.0.0",
+		Description: "Example service",
+		Default:     "serve",
+		Commands: []climd.Command{
+			{
+				Name:  "serve",
+				Short: "Start the HTTP server",
+				Flags: []climd.Flag{{Name: "addr", Short: "a", Usage: "listen address"}},
+				Run: func(ctx context.Context, args []string, flags map[string]string) error {
+					addr := flags["addr"]
+					if addr == "" {
+						addr = ":8080"
+					}
+					fmt.Println("listening on", addr)
+					return nil
+				},
+			},
+			{
+				Name:  "db",
+				Short: "Database tasks",
+				SubCommands: []climd.SubCommand{
+					{
+						Name:  "migrate",
+						Short: "Apply migrations",
+						Flags: []climd.Flag{{Name: "dir", Usage: "migrations directory", Required: true}},
+						Run: func(ctx context.Context, args []string, flags map[string]string) error {
+							fmt.Println("migrating from", flags["dir"])
+							return nil
+						},
+					},
+				},
+			},
+		},
+	})
 }
 ```
 
-## Example Usage
-
-```bash
-# Serve command with flags
-./cmd serve --http=all --grpc=module1 --consumer=module1,module2
-
-# Exec command with boolean flags
-./cmd exec --migrate-old-user --migrate-old-transactions
-
-# DB command with subcommands
-./cmd db init
-./cmd db migrate
-./cmd db create_sql --output=./migrations
+```sh
+myapp                          # runs the default command, serve
+myapp serve --addr :9000
+myapp db migrate --dir ./sql
+myapp --help
+myapp --version
 ```
+
+## Reference
+
+| Type | Fields |
+| --- | --- |
+| `AppConfig` | `Name`, `Version`, `Description`, `Commands`, `Default` |
+| `Command` | `Name`, `Short`, `Long`, `Flags`, `SubCommands`, `Run` |
+| `SubCommand` | `Name`, `Short`, `Long`, `Flags`, `Run` |
+| `Flag` | `Name`, `Short`, `Usage`, `Required` |
+
+`Run` receives the context, the positional arguments, and the flags as `map[string]string`.
+
+Flag parsing rules:
+
+- A flag takes the next argument as its value unless that argument starts with `-`. Otherwise the flag is a boolean and maps to `""`, so check presence with `_, ok := flags["verbose"]`.
+- Values are separated by a space. `--addr=:9000` is not parsed as a flag.
+- The map key is the form the user typed: `-a` is stored under `"a"`, `--addr` under `"addr"`. If you declare a `Short` form, read both keys.
+- Unknown flags are passed through as positional arguments.
+- A command with subcommands but no subcommand given prints that command's help.
+
+## Not included
+
+- No `--name=value` syntax, no typed flag values, and no flag defaults. Values are strings; parse them in `Run`.
+- No shell completion and no generated man pages.
+- No signal handling. `Run` gets `context.Background()`; wrap it with `signal.NotifyContext` inside your command.
 
 ## License
 

@@ -1,6 +1,12 @@
 # foreverwork
 
-`foreverwork` runs long-lived worker pools: one pool per job type, each with its own goroutines, queue, per-job timeout and typed handler. No polling — a worker blocks on its channel and wakes the moment a job is queued. Standard library only.
+Typed worker pools and tickers with timeouts, panic recovery and graceful shutdown.
+
+`foreverwork` runs long-lived background work inside your service: one pool per job type, each with its own goroutines, queue, per-job timeout and typed handler. There is no polling; a worker blocks on its channel and wakes the moment a job is queued. Standard library only.
+
+```sh
+go get github.com/moeghifar/libgo/pkg/foreverwork
+```
 
 ## Features
 
@@ -12,8 +18,6 @@
 - Cancellation causes (`ErrJobTimeout`, `ErrShutdown`) so a pool's ceiling is told apart from your own dependency's timeout
 - `Every`: the other shape of long-lived work, a ticker that cannot overlap itself and survives a panic
 - No global state: the logger is injected (`*slog.Logger`, default `slog.Default()`)
-
-What it deliberately does not do: databases, batching, retries, deduplication. State that makes work resumable belongs in your tables, and a handler that finds its work already done returns without redoing it. A pool is not a durable queue.
 
 ## Usage
 
@@ -68,7 +72,7 @@ func main() {
 
 Register every pool before `Run`; `Register` after `Run`, or a second `Run`, panics.
 
-## Configuration
+## Reference
 
 `Config` describes one pool:
 
@@ -137,6 +141,12 @@ wp.OnPanic = func(ctx context.Context, p *foreverwork.PanicError) {
 1. Pass `ctx` to every database query and HTTP call. Timeout and shutdown both work through it; a handler that ignores it keeps `Run` waiting until the grace ends.
 2. Be idempotent. Dropped jobs must be re-derivable from your own state, and a source that redelivers (a message queue) will deliver twice.
 3. Do not spawn goroutines that can panic without their own recover.
+
+## Not included
+
+- No persistence. A pool is not a durable queue: jobs still queued at shutdown are dropped unless `DrainQueue` is set. Keep the state that makes work resumable in your own tables.
+- No retries, batching or deduplication. A handler that finds its work already done should return without redoing it.
+- No coordination across replicas. `Every` runs in one process; use a lock or leader election if several replicas must not run the same pass.
 
 ## License
 

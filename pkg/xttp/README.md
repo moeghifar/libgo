@@ -1,8 +1,12 @@
 # xttp
 
-Fiber v3 routes that also describe themselves as an OpenAPI 3.1 document.
+Fiber v3 server with OpenAPI 3.1 generated from your types and hardened defaults.
 
-It looks like Huma from the outside, one struct per operation with OpenAPI generated from Go types, but it does not wrap your handler. Handlers stay plain `fiber.Handler`: you bind the request and write the response yourself, with all of Fiber's control. The types on a route only describe it.
+Each route is one struct, and its Go types become the OpenAPI document, as in Huma. Unlike Huma, xttp does not wrap your handler: handlers stay plain `fiber.Handler`, so you bind the request and write the response yourself with all of Fiber's control. The types on a route only describe it. `xttp.New` also gives you a production server: security headers, rate limit, timeouts, probes, access log and JSON:API errors.
+
+```sh
+go get github.com/moeghifar/libgo/pkg/xttp
+```
 
 ## Features
 
@@ -50,8 +54,8 @@ v1.Add(
 		Responses: map[int]any{200: []User{}},
 		Handler: func(c fiber.Ctx) error {
 			var q ListUsers
-			if err := c.Bind().Query(&q); err != nil {
-				return ErrBadInput.With(err.Error(), err)
+			if err := xttp.BindQuery(c, &q); err != nil {
+				return err // a 400 JSON:API error
 			}
 			return c.JSON([]User{})
 		},
@@ -65,8 +69,11 @@ v1.Add(
 		Responses: map[int]any{201: User{}},
 		Handler: func(c fiber.Ctx) error {
 			var u User
-			if err := c.Bind().JSON(&u); err != nil {
-				return ErrBadInput.With(err.Error(), err)
+			if err := xttp.Bind(c, &u); err != nil {
+				return err // unknown fields, trailing data or wrong types: 400
+			}
+			if u.Name == "" {
+				return ErrBadInput.With("name is required", nil)
 			}
 			return c.Status(fiber.StatusCreated).JSON(u)
 		},
@@ -110,7 +117,7 @@ os.WriteFile("openapi.yaml", api.YAML(), 0o644)
 | Listener | `tcp` (IPv4 + IPv6) | `Listen.ListenerNetwork: fiber.NetworkTCP4` |
 | Shutdown | `Run` stops on ctx done, SIGINT or SIGTERM; `/readyz` → 503; waits 10s for in-flight requests | `Listen.ShutdownTimeout`; TLS via `Listen.CertFile`… |
 
-Middleware order: probes (not logged, not limited) → request id → slog access log → recover → security headers → CORS → rate limit → pprof → content-type check → docs → your routes.
+Middleware order: probes (not logged, not limited) → request id → slog access log → recover → security headers → CORS → rate limit → content-type check → pprof → docs → your routes.
 
 Middleware can read the status of a returned error with `xttp.StatusOf(err)`: the error handler sets the response status only after the chain returned.
 
@@ -206,11 +213,31 @@ func getUser(c fiber.Ctx) error {
 
 ## Binding, errors and auth helpers
 
-`xttp.Bind(c, &in)` decodes JSON strictly: unknown fields, trailing data and wrong types are a 400. `xttp.BindQuery(c, &q)` binds the query. A `required:"true"` query parameter on `Route.Query` is now enforced with a 400 naming it, after `Route.Middlewares`.
+`xttp.Bind(c, &in)` decodes JSON strictly: unknown fields, trailing data and wrong types are a 400. `xttp.BindQuery(c, &q)` binds the query. A `required:"true"` query parameter on `Route.Query` is enforced with a 400 naming it, after `Route.Middlewares`.
 
 `Config.MapError` turns your own errors into `*xttp.Error` in one place; `CodeOf` and `IsCode` read the code back. `Config.OnResponse` gets the final status of every routed request, including panics, for audit logs and metrics.
 
 `xttp.BearerTokens(tokens...)` and `xttp.APIKey(header, keys...)` compare in constant time and panic at startup on an empty list. Pair them with `Route.Security` and `Config.SecuritySchemes` to document them. Custom auth middleware records the caller with `SetPrincipal`; handlers read it with `PrincipalOf`.
+
+## Outbound HTTP log
+
+`xttp.OutboundLog` is an `http.RoundTripper` that logs every call your service makes to other APIs:
+
+```go
+client := &http.Client{Transport: &xttp.OutboundLog{}} // or OutboundLog{Next: yourTransport, Logger: l}
+
+req, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, "https://api.example.com/v1/users", nil)
+res, err := client.Do(req)
+```
+
+```json
+{"level":"WARN","msg":"http outbound","method":"GET","host":"api.example.com","path":"/v1/users","status":404,"latency":41000000,"size":120,"request_id":"abc123"}
+```
+
+- Info below 400, Warn for 4xx, Error for 5xx and transport errors.
+- A nil `Logger` uses `slog.Default()` on each call, so after `slog.SetDefault(xlog.New(...))` the line follows xlog's format, service group and redaction. Context attributes such as `request_id` come from the request's context.
+- The query string, headers and bodies are never logged: they often carry tokens and personal data.
+- It is opt-in by use: code that never names `OutboundLog` does not link it, so there is no build tag.
 
 ## Struct tags
 
@@ -221,9 +248,19 @@ func getUser(c fiber.Ctx) error {
 | `query`    | `Query` struct | query parameter name (same tag Fiber binds) |
 | `required` | any field    | `"true"` / `"false"` overrides the default (query: optional; body: required unless `omitempty`/`omitzero`) |
 
-## What it does not do
+## Build tags
 
-No validation, no request binding, no security schemes. Use Fiber's `c.Bind()`. Add these when a real route needs them.
+| Tag | Effect |
+| --- | --- |
+| `xttp_slim` | Leaves the default middleware out of `ModeRaw` builds; an unset `Mode` panics. See [Mode](#mode). |
+| `xttp_pprof` | Links pprof so `Profiling.Enabled` works. See [Profiling](#profiling). |
+
+## Not included
+
+- No validation beyond strict JSON decoding and required query parameters. Check field values in the handler and return an `xttp.Error`.
+- No response encoding or handler wrapping. You call `c.JSON` yourself; `Responses` only documents what you send.
+- No authentication beyond static bearer tokens and API keys. For JWT or OAuth, write a middleware that calls `SetPrincipal`.
+- No way around Fiber's own weight. Fiber links its compression, TLS and `net/http` code whatever you use; `xttp` adds about 0.2 MB on top in a slim `ModeRaw` build.
 
 ## License
 

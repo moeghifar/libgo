@@ -1,6 +1,6 @@
 # libgo
 
-A toolset of small Go libraries: lightweight, fast and clean. Each package under `pkg/` stands on its own, so you import only what you use, inside your own framework or directly.
+Small, independent Go packages for building services. libgo is a set of tools, not a framework: take the one package you need and leave the rest.
 
 ```sh
 go get github.com/moeghifar/libgo@latest
@@ -8,80 +8,66 @@ go get github.com/moeghifar/libgo@latest
 
 Requires Go 1.27.3 or later.
 
+## Philosophy
+
+libgo is built on a few rules. Every package follows them.
+
+1. **Standard library first.** Any third-party dependency has to justify itself. Five of the six packages import only the standard library; `xttp` builds on Fiber because that is its job.
+2. **Lightweight is the product.** Binary size, allocations and startup cost count as features. A feature that cannot pay for its weight does not ship, and anything optional can be compiled out with a build tag.
+3. **Independent packages.** No package depends on another, except the stdlib-only `xerr` error model that they share. Importing `envy` does not pull in an HTTP server.
+4. **Plain structs, not builders.** A struct literal describes the whole thing (a CLI, a server, a worker pool), so you can read your configuration in one place.
+5. **Secure, production-ready defaults.** The zero value is the safe one: timeouts are on, payloads are kept out of logs, and debug endpoints are off. You opt out deliberately, never in by accident.
+6. **No hidden state.** No package-level mutable variables, no `init()` side effects, and loggers are injected.
+7. **Reflection at startup, never per request.** Struct tags are read once at registration; the hot path runs precomputed code.
+8. **Errors are values.** Library code returns errors. It panics only on programmer mistakes detected at startup, such as a route registered without a handler.
+
 ## Packages
 
-| Package | What it does | Dependencies |
+| Package | Purpose | Dependencies |
 | --- | --- | --- |
-| [`envy`](pkg/envy/README.md) | Loads environment variables and an optional `.env` file into a tagged struct | godotenv (drop it with `-tags libgo_envy_slim`) |
-| [`climd`](pkg/climd/README.md) | Lightweight CLI builder, a Cobra alternative described by one struct | stdlib |
+| [`envy`](pkg/envy/README.md) | Load environment variables and an optional `.env` file into a tagged struct | godotenv, removable with `-tags libgo_envy_slim` |
+| [`climd`](pkg/climd/README.md) | Command-line apps described by one struct; a small alternative to Cobra | stdlib |
 | [`foreverwork`](pkg/foreverwork/README.md) | Typed worker pools and tickers with timeouts, panic recovery and graceful shutdown | stdlib |
-| [`xerr`](pkg/xerr/README.md) | Typed JSON:API error values (`Error`, `Errors`, `StatusOf`, `CodeOf`) shared by HTTP, gRPC, workers and CLIs | stdlib |
-| [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your structs, JSON:API errors (`xerr`) and production defaults | Fiber v3 |
-| [`xlog`](pkg/xlog/README.md) | What `log/slog` lacks: context attrs (`request_id` on every `InfoContext` line), `Redact` by key and a compact coloured dev handler | stdlib |
+| [`xerr`](pkg/xerr/README.md) | One typed error model (status, code, hidden cause) for HTTP, gRPC, workers and CLIs | stdlib |
+| [`xlog`](pkg/xlog/README.md) | What `log/slog` lacks: context attributes, redaction, a compact dev handler | stdlib |
+| [`xttp`](pkg/xttp/README.md) | Fiber v3 server with OpenAPI 3.1 generated from your types and hardened defaults | Fiber v3 |
 
-### xttp at a glance
+Every package README has the same layout: install, features, usage, reference, build tags, and what the package deliberately leaves out.
 
-```go
-var ErrNotFound = xttp.Error{Status: 404, Code: "USR-404", Title: "User not found"}
+## Build tags
 
-api := xttp.New(xttp.Config{Info: xttp.Info{Title: "Users", Version: "1.0.0"}})
-api.Add(xttp.Route{
-	Method:    fiber.MethodGet,
-	Path:      "/users/:id",
-	Responses: map[int]any{200: User{}},
-	Handler: func(c fiber.Ctx) error {
-		u, err := repo.Find(c.Params("id"))
-		if err != nil {
-			return ErrNotFound.With("no user "+c.Params("id"), err) // err is logged, never sent
-		}
-		return c.JSON(u)
-	},
-})
-api.Run(ctx, ":8080") // graceful stop on SIGINT/SIGTERM
+Optional code stays out of your binary unless you ask for it.
+
+| Tag | Effect |
+| --- | --- |
+| `libgo_envy_slim` | `envy` without `.env` support, so godotenv is not linked |
+| `xttp_slim` | `xttp` without its default middleware when you use `ModeRaw` |
+| `xttp_pprof` | Links pprof into `xttp`; without the tag, `Profiling.Enabled` panics at startup |
+
+For release builds, also strip paths and debug info:
+
+```sh
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/yourapp
 ```
 
-Out of the box: request ID, slog access log, panic recovery, helmet headers and `Cache-Control: no-store` on every response (413/431 included), no `Server` banner, 100 req/s rate limit per IP, 1 MiB body limit, read/write/idle timeouts, dual-stack listener, Kubernetes probes (`/livez`, `/readyz`, `/startupz`), JSON:API errors including 404, and optional CORS, docs (`Docs{Enabled: true}`), pprof behind a guard, a `HelmetStrict` preset and strict `application/json` bodies. [`example/`](example) runs this hardened profile. See the [xttp README](pkg/xttp/README.md#server-defaults).
+## Example service
 
-## Example
-
-[`example/`](example) is the reference bootstrap: copy it to start a new service. `envy` loads each command's config, `climd` parses the command, and `serve` runs a hardened `xttp` API that queues jobs on a `foreverwork` pool. Settings are in [`.env.example`](example/.env.example), and business code goes in `internal/<module>`.
-
-[`example/fiber/`](example/fiber/main.go) shows that xttp doesn't stop you using any of Fiber: custom and stock Fiber middleware (global, group and per route), `timeout`-wrapped handlers, plain `app.Get` routes, `net/http` handlers through `adaptor`, and a mounted `*fiber.App`. Its test proves each one.
+[`example/`](example) is a reference service to copy when starting a new one. `envy` loads the config, `climd` parses the command, and `serve` runs a hardened `xttp` API that queues jobs on a `foreverwork` pool.
 
 ```sh
 go run ./example serve
-curl -X POST localhost:8080/v1/users -H 'Content-Type: application/json' \
-  -d '{"name":"Ada","email":"ada@example.com"}'
-open http://localhost:8080/docs
 ```
 
 ## Development
 
 ```sh
-make check     # everything below, in order
-make verify    # go mod verify
-make vet       # go vet ./...
-make test      # go test -race ./...
-make lint      # golangci-lint: code quality
-make security  # golangci-lint: security linters only
-make vuln      # govulncheck: known vulnerabilities
-make trivy     # trivy (Docker): dependencies, secrets, misconfiguration
-make secrets   # gitleaks: secrets in git history
-make docker    # build the hardened example image
-make docker-run # run it isolated on 127.0.0.1:8080
+make check   # runs every check below, in order
+make test    # go test -race, with and without build tags
+make lint    # golangci-lint
+make vuln    # govulncheck
 ```
 
-CI runs each of these as its own step on every push and pull request.
-
-Releases use [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) with conventional commits; see [CHANGELOG.md](CHANGELOG.md).
-
-### Smaller binaries
-
-Strip paths and debug info for release builds, 31-35% smaller:
-
-```sh
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/yourapp
-```
+The `Makefile` also has `security`, `trivy`, `secrets` and `docker` targets. CI runs each check on every push and pull request. Releases follow conventional commits; see [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

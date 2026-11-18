@@ -1,81 +1,82 @@
-# Envy
+# envy
 
-Simple, reflection-based environment variable loader for Go with optional `.env` file support using `godotenv`.
+Load environment variables, and an optional `.env` file, into a tagged struct.
+
+You describe your configuration as a Go struct, and `envy` fills it from struct tags: default values first, then the `.env` file, then the real environment. The only dependency is godotenv for `.env` files, and a build tag removes it for production.
+
+```sh
+go get github.com/moeghifar/libgo/pkg/envy
+```
 
 ## Features
 
--   **Zero Config**: Just struct tags to define your config.
--   **Types**: Supports `string`, `int`, `uint`, `bool`, `float`, and `slice` types (`[]string`, `[]int`, etc.).
--   **Nested Structs**: Recursively parses nested structs for organized configuration.
--   **Optional .env**: Loads `.env` file if present (optional via build tags for production).
--   **Defaults & Required**: Struct tags for default values and required fields.
+- **Struct tags only:** `env`, `default` and `required` describe each field. There is nothing else to configure.
+- **Typed values:** `string`, signed and unsigned integers, `bool`, floats, and slices of these (comma-separated).
+- **Nested structs:** grouped settings are filled recursively.
+- **Clear precedence:** defaults, then `.env`, then the environment. A variable that is already set always wins over `.env`.
+- **Required fields:** a `required:"true"` field that ends up empty is an error. If it has a default, `envy` uses it and logs a warning instead.
+- **Defaults only:** `Defaults` applies the `default` tags without reading anything, which is handy in tests.
 
 ## Usage
-
-### 1. Define your config struct
-
-Use struct tags `env`, `default`, and `required`.
-
-```go
-type Config struct {
-	AppPort int    `env:"APP_PORT" default:"8080"`
-	Debug   bool   `env:"DEBUG" default:"false"`
-	APIKey  string `env:"API_KEY" required:"true"`
-	
-	// Slices (comma separated in env)
-	AllowedHosts []string `env:"ALLOWED_HOSTS" default:"localhost"`
-	
-	// Nested Structs
-	Database struct {
-		DSN string `env:"DB_DSN"`
-	}
-}
-```
-
-### 2. Load Configuration
 
 ```go
 package main
 
 import (
 	"log"
+
 	"github.com/moeghifar/libgo/pkg/envy"
 )
 
-func main() {
-	var cfg Config
-	
-	// Loads from .env (if present) and environment variables
-	if err := envy.Load(&cfg); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+type Config struct {
+	Port         int      `env:"APP_PORT" default:"8080"`
+	Debug        bool     `env:"DEBUG" default:"false"`
+	APIKey       string   `env:"API_KEY" required:"true"`
+	AllowedHosts []string `env:"ALLOWED_HOSTS" default:"localhost"` // ALLOWED_HOSTS=a.com,b.com
+
+	Database struct {
+		DSN string `env:"DB_DSN" required:"true"`
 	}
-	
-	// Usage
-	log.Printf("Listening on port %d", cfg.AppPort)
 }
 
+func main() {
+	var cfg Config
+	if err := envy.Load(&cfg); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("listening on :%d", cfg.Port)
+}
 ```
 
-### Defaults only
+## Reference
 
-`envy.Defaults(&cfg)` applies the `default` tags and nothing else: no `.env`, no environment, `required` ignored. `Load` runs it first, then `.env`, then the environment. A required field that falls back to its default is reported through `slog.Default().Warn`.
+| Function | What it does |
+| --- | --- |
+| `Load(&cfg)` | Applies `default` tags, loads `.env` if the file exists, then reads the environment. Returns an error for an empty `required` field or a value that does not parse. |
+| `Defaults(&cfg)` | Applies `default` tags only: no `.env`, no environment, and `required` is not checked. |
 
-## Build Optimization
+| Tag | Meaning |
+| --- | --- |
+| `env:"NAME"` | Variable to read. A field without it is skipped (nested structs are always walked). |
+| `default:"value"` | Value used when the variable is unset or empty |
+| `required:"true"` | The field must end up non-empty |
 
-By default, this package imports `github.com/joho/godotenv` to load `.env` files. This is great for development.
+## Build tags
 
-For production builds where you rely solely on system environment variables (e.g., Docker, Kubernetes) and want to save binary size (approx. 600KB), you can exclude the `.env` loading logic using the `libgo_envy_slim` build tag.
+`.env` support links godotenv (about 600 KB). Containers and Kubernetes set the real environment, so production builds can leave it out:
 
-### Standard Build (Development)
-Include `.env` support.
-
-```bash
-go build -o app main.go
+```sh
+go build -tags libgo_envy_slim .
 ```
 
-### Efficient Build (Production)
-Exclude `.env` support and reduce binary size.
+With the tag, `Load` reads only defaults and the environment.
 
-```bash
-go build -tags libgo_envy_slim -o app main.go
-```
+## Not included
+
+- No variable expansion (`${OTHER}`) and no file formats other than `.env`.
+- No validation beyond `required`. Check value ranges in your own code after `Load`.
+- No hot reload. Configuration is read once at startup.
+
+## License
+
+Apache 2.0, see [LICENSE](../../LICENSE)

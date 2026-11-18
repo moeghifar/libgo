@@ -1,6 +1,12 @@
 # xerr
 
-`xerr` is the typed error model shared by libgo packages: a [JSON:API error object](https://jsonapi.org/format/#error-objects) with an HTTP status, an application code and a hidden internal cause. It imports only the standard library, so workers, CLIs and gRPC servers return the same errors that `xttp` renders, without linking an HTTP stack. `xttp.Error`, `xttp.Errors` and `xttp.ErrorSource` are aliases of these types.
+One typed error model for HTTP, gRPC, workers and CLIs.
+
+An `xerr.Error` is a [JSON:API error object](https://jsonapi.org/format/#error-objects) with an HTTP status, an application code and a hidden internal cause. The package imports only the standard library, so workers, CLIs and gRPC servers can return the same errors that `xttp` renders, without linking an HTTP stack. `xttp.Error`, `xttp.Errors` and `xttp.ErrorSource` are aliases of these types.
+
+```sh
+go get github.com/moeghifar/libgo/pkg/xerr
+```
 
 ## Features
 
@@ -67,6 +73,31 @@ In an `xttp` handler the same error renders as:
 ```json
 {"errors":[{"id":"<request id>","status":"404","code":"USR-404","title":"User not found","detail":"no user with id 42"}]}
 ```
+
+## Reference
+
+| Field of `Error` | Meaning |
+| --- | --- |
+| `Status` | HTTP status |
+| `Code` | Application code, such as `USR-404` |
+| `Title` | Short summary, the same for every occurrence |
+| `Detail` | This occurrence, shown to the client |
+| `Source` | `*ErrorSource{Pointer, Parameter, Header}`: the part of the request at fault. Set one field. |
+| `Meta` | Extra non-standard data |
+| `Err` | Internal cause: logged and visible to `errors.Is`/`errors.As`, never sent |
+
+| Function | What it does |
+| --- | --- |
+| `(Error).With(detail, err) *Error` | Copy with this occurrence's detail and cause |
+| `StatusOf(err) int` | Status the error stands for: 0 for nil, 500 for a plain error |
+| `CodeOf(err) string` | Code of the first `*Error` found, `""` if none |
+| `IsCode(err, code) bool` | Whether `CodeOf(err)` equals `code` |
+| `Flatten(err) Errors` | The `*Error` values an error stands for, for renderers |
+
+## Not included
+
+- No rendering. `xerr` has no HTTP or gRPC code; `xttp` renders the JSON:API document, and a gRPC server maps `StatusOf` to a status code.
+- No stack traces and no error catalogue. Declare your errors as package-level values next to the code that returns them.
 
 ## License
 

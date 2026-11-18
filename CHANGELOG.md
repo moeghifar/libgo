@@ -10,6 +10,27 @@ All notable changes to this project will be documented in this file. See [commit
 * **deps:** require go 1.27.4 for GO-2026-6859 (net/http); bump fiber v3.7.0, fasthttp v1.79.0, golang.org/x/crypto v0.59.0, x/sys, x/text
 
 
+## 0.5.0 (2026-11-18)
+
+
+### Features
+
+* **xlog:** `New(Config)` builds a JSON or dev logger with level, source, redaction, a `message` key rename and a `service` group (name, version, env) computed once; it sets nothing global
+* **xlog:** level functions `Debug`, `Info`, `Notice`, `Warn`, `Error`, `Fatal` `(ctx, msg, args...)` on `slog.Default()`, with the source pointing at the caller
+* **xlog:** `LevelNotice` (between Info and Warn) and `LevelFatal` (logs, then exits 1), printed as `NOTICE` and `FATAL`
+* **xttp:** `OutboundLog`, an `http.RoundTripper` that logs outbound calls (method, host, path, status, latency, size) through `slog.Default()`; query, headers and bodies are never logged, and it is not linked unless used
+
+
+### Performance
+
+* **xlog:** the dev handler no longer allocates per line (was 8 allocations)
+
+
+### Documentation
+
+* root README is about libgo's philosophy; every package README follows one layout (install, features, usage, reference, build tags, not included)
+
+
 ## 0.4.0 (2026-11-10)
 
 

@@ -320,3 +320,90 @@ func TestGroupRoot(t *testing.T) {
 	}()
 	api.Add(Route{Method: "GET", Path: "", Handler: func(fiber.Ctx) error { return nil }})
 }
+
+type ActionHeaders struct {
+	Key   string `header:"Idempotency-Key" required:"true" doc:"One per attempt"`
+	Trace string `header:"X-Trace"`
+}
+
+type UserPath struct {
+	ID int `path:"id" doc:"User id"`
+}
+
+func TestHeaderAndPathParams(t *testing.T) {
+	_, api := newAPI()
+	api.Add(Route{
+		Method: fiber.MethodPost, Path: "/orgs/:org/users/:id",
+		Headers: ActionHeaders{}, PathParams: UserPath{},
+		Responses: map[int]any{
+			200: Response{Body: User{}},
+			409: Response{Description: "The key was used for another request"},
+		},
+		Handler: func(c fiber.Ctx) error { return nil },
+	})
+	op := get(t, api.Spec(), "paths", "/orgs/{org}/users/{id}", "post")
+
+	params := get(t, op, "parameters").([]any)
+	var names []string
+	for _, p := range params {
+		pm := p.(map[string]any)
+		names = append(names, pm["in"].(string)+":"+pm["name"].(string))
+	}
+	if want := []string{"path:org", "path:id", "header:Idempotency-Key", "header:X-Trace"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("params = %v, want %v", names, want)
+	}
+
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"undescribed path param stays a string", get(t, params[0], "schema", "type"), "string"},
+		{"path param schema from field type", get(t, params[1], "schema", "type"), "integer"},
+		{"path param doc", get(t, params[1], "description"), "User id"},
+		{"required header", get(t, params[2], "required"), true},
+		{"header doc", get(t, params[2], "description"), "One per attempt"},
+		{"optional header", get(t, params[3], "required"), nil},
+		{"Response body", get(t, op, "responses", "200", "content", "application/json", "schema", "$ref"), "#/components/schemas/User"},
+		{"Response without description keeps the status text", get(t, op, "responses", "200", "description"), "OK"},
+		{"Response description", get(t, op, "responses", "409", "description"), "The key was used for another request"},
+		{"Response without body on an error is the error document", get(t, op, "responses", "409", "content", MIMEJSONAPI, "schema", "$ref"), "#/components/schemas/ErrorDocument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("got %#v, want %#v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddPanicsOnBadParams(t *testing.T) {
+	tests := []struct {
+		name  string
+		route Route
+	}{
+		{"path param not in path", Route{Path: "/users/:id", PathParams: struct {
+			Org string `path:"org"`
+		}{}}},
+		{"Authorization header", Route{Path: "/x", Headers: struct {
+			A string `header:"Authorization"`
+		}{}}},
+		{"Content-Type header, any case", Route{Path: "/x", Headers: struct {
+			C string `header:"content-type"`
+		}{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, api := newAPI()
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			tt.route.Method = "GET"
+			tt.route.Handler = func(c fiber.Ctx) error { return nil }
+			api.Add(tt.route)
+		})
+	}
+}

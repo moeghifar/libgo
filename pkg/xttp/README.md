@@ -12,11 +12,11 @@ go get github.com/moeghifar/libgo/pkg/xttp
 
 - **Production server by default**: `xttp.New(Config)` builds the Fiber app; see [Server defaults](#server-defaults)
 - **Plain handlers**: `func(c fiber.Ctx) error`, no input/output wrapper structs, no hidden binding or encoding
-- **One struct per route**: `Route{Method, Path, Summary, Tags, Query, Body, Responses, Handler}`
+- **One struct per route**: `Route{Method, Path, Summary, Tags, Query, Headers, PathParams, Body, Responses, Handler}`
 - **Schemas from Go types**: structs, pointers, slices, maps, `time.Time`, `[]byte`, embedded structs, recursive types
 - **`encoding/json` rules**: `json` names, `-` skipped, `omitempty`/`omitzero` mean optional, everything else is required
 - **Components and `$ref`**: named structs are written once under `components/schemas`
-- **Parameters**: Fiber `:id` / `:id?` become `{id}` path params; a `Query` struct's `query:"name"` fields become query params
+- **Parameters**: Fiber `:id` / `:id?` become `{id}` path params, typed and described by a `PathParams` struct's `path:"name"` fields; a `Query` struct's `query:"name"` fields become query params and a `Headers` struct's `header:"Name"` fields header params
 - **Groups**: `api.Group("/v1", mw...)` prefixes both the Fiber routes and the document paths
 - **Per-route middlewares**: `Route.Middlewares` run before the handler
 - **YAML and JSON**: `api.YAML()` / `api.JSON()`, plus `Docs{Enabled: true}` (or `api.Docs("/docs")`) serving a Scalar page, `/docs/openapi.yaml` and `/docs/openapi.json`
@@ -208,12 +208,13 @@ func getUser(c fiber.Ctx) error {
 - Fiber errors (unknown route 404, 405, 413) keep their status; any other error is a 500 with no internal text in the body, logged with slog
 - Safe without middlewares: requests fasthttp rejects before routing still get a valid document, with the security headers
 - `xttp.ErrorDocument{Errors []ErrorObject}` is the wire type; a `Responses` entry ≥ 400 with `nil` or `ErrorDocument{}` is documented as `application/vnd.api+json` with that schema, and `Config.DefaultErrors` adds it to every route
+- `xttp.Response{Description, Body}` as a `Responses` value replaces the status text with your own description, e.g. to say when a 409 happens; its `Body` follows the same rules as a plain value
 - `xttp.StatusOf(err)` returns the status the handler will send (0 for nil), for audit or metrics middleware
 - `xttp.Error`, `Errors` and `ErrorSource` are aliases of [`xerr`](../xerr/README.md); code that serves no HTTP (workers, CLIs, gRPC) imports `xerr` and returns the same values without linking Fiber
 
 ## Binding, errors and auth helpers
 
-`xttp.Bind(c, &in)` decodes JSON strictly: unknown fields, trailing data and wrong types are a 400. `xttp.BindQuery(c, &q)` binds the query. A `required:"true"` query parameter on `Route.Query` is enforced with a 400 naming it, after `Route.Middlewares`.
+`xttp.Bind(c, &in)` decodes JSON strictly: unknown fields, trailing data and wrong types are a 400. `xttp.BindQuery(c, &q)` binds the query. A `required:"true"` query parameter on `Route.Query`, or header on `Route.Headers`, is enforced with a 400 naming it, after `Route.Middlewares`.
 
 `Config.MapError` turns your own errors into `*xttp.Error` in one place; `CodeOf` and `IsCode` read the code back. `Config.OnResponse` gets the final status of every routed request, including panics, for audit logs and metrics.
 
@@ -246,7 +247,9 @@ res, err := client.Do(req)
 | `json`     | body/response | property name, `-`, `omitempty`, `omitzero` |
 | `doc`      | any field    | description                                   |
 | `query`    | `Query` struct | query parameter name (same tag Fiber binds) |
-| `required` | any field    | `"true"` / `"false"` overrides the default (query: optional; body: required unless `omitempty`/`omitzero`) |
+| `header`   | `Headers` struct | header parameter name; not `Accept`, `Content-Type` or `Authorization`, which OpenAPI ignores as parameters (credentials go in `Security`) |
+| `path`     | `PathParams` struct | a `Path` parameter to type and describe; one not in `Path` panics at `Add` |
+| `required` | any field    | `"true"` / `"false"` overrides the default (query and header: optional; body: required unless `omitempty`/`omitzero`) |
 
 ## Build tags
 
@@ -257,7 +260,7 @@ res, err := client.Do(req)
 
 ## Not included
 
-- No validation beyond strict JSON decoding and required query parameters. Check field values in the handler and return an `xttp.Error`.
+- No validation beyond strict JSON decoding and required query and header parameters. Check field values in the handler and return an `xttp.Error`.
 - No response encoding or handler wrapping. You call `c.JSON` yourself; `Responses` only documents what you send.
 - No authentication beyond static bearer tokens and API keys. For JWT or OAuth, write a middleware that calls `SetPrincipal`.
 - No way around Fiber's own weight. Fiber links its compression, TLS and `net/http` code whatever you use; `xttp` adds about 0.2 MB on top in a slim `ModeRaw` build.

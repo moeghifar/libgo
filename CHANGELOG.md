@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.6.0 (2026-11-24)
+
+
+### Features
+
+* **xttp:** `Route.Headers`, a struct whose `header:"Name"` fields become header parameters, tagged like `Query`; a `required:"true"` header is enforced with a 400 naming it, after `Route.Middlewares`. `Accept`, `Content-Type` and `Authorization` panic at `Add`
+* **xttp:** `Route.PathParams`, a struct whose `path:"name"` fields give a path parameter its schema and `doc`; parameters it leaves out stay strings, and naming one not in the path panics at `Add`
+* **xttp:** `xttp.Response{Description, Body}` as a `Responses` value replaces the status text, e.g. to say when a 409 happens
+
+
+### Bug Fixes
+
+* **xttp:** path parameters from a `Group` prefix (e.g. `/orgs/:org`) are now documented, and `PathParams` can describe them
+* **example:** bump `chainguard/go` and `chainguard/static` base images
+
+
 ## 0.4.2 (2026-11-17)
 
 

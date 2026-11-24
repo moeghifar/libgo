@@ -100,7 +100,7 @@ func levelColor(l slog.Level) string {
 
 // Handle formats r as one line and writes it under the handler's lock.
 func (h *DevHandler) Handle(_ context.Context, r slog.Record) error {
-	bp := bufPool.Get().(*[]byte)
+	bp := bufPool.Get().(*[]byte) //nolint:forcetypeassert // bufPool.New only makes *[]byte
 	b := (*bp)[:0]
 	defer func() {
 		if cap(b) <= 16<<10 { // ponytail: drop huge buffers instead of pinning them

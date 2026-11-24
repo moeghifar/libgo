@@ -62,3 +62,21 @@ func requireQuery(names []string) fiber.Handler {
 		return c.Next()
 	}
 }
+
+// requireHeaders answers 400 naming every required header the request lacks.
+func requireHeaders(names []string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		var missing Errors
+		for _, name := range names {
+			if c.Get(name) == "" {
+				e := errBadRequest.With("header is required", nil)
+				e.Source = &ErrorSource{Header: name}
+				missing = append(missing, e)
+			}
+		}
+		if len(missing) > 0 {
+			return missing
+		}
+		return c.Next()
+	}
+}

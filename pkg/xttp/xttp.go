@@ -3,7 +3,7 @@
 //
 // It is not a framework over Fiber. Handlers stay plain fiber.Handler: you read
 // the request and write the response yourself, with all of Fiber's control.
-// The types on a Route — Query, Body, Responses — exist only to describe the
+// The types on a Route — Query, Headers, PathParams, Body, Responses — exist only to describe the
 // operation. They are reflected once, when the route is added, and never touched
 // on a request.
 //
@@ -53,10 +53,18 @@ type Route struct {
 	// Query is a struct whose `query:"name"` fields become query parameters.
 	// A `required:"true"` tag marks one required; `doc:"..."` describes it.
 	Query any
+	// Headers is a struct whose `header:"Name"` fields become header parameters,
+	// tagged like Query. Accept, Content-Type and Authorization are not allowed:
+	// OpenAPI ignores them as parameters, and credentials belong in Security.
+	Headers any
+	// PathParams is a struct whose `path:"name"` fields describe Path's parameters:
+	// the field type gives the schema and `doc:"..."` the description. Path
+	// parameters it leaves out stay strings.
+	PathParams any
 	// Body is the JSON request body type, e.g. CreateUser{}. Nil means none.
 	Body any
 	// Responses maps a status code to its JSON body type. A nil value
-	// documents the status with no body.
+	// documents the status with no body; a Response value adds a description.
 	Responses map[int]any
 	// Security names schemes from Config.SecuritySchemes for the document. It
 	// describes the route only: enforcing it is Middlewares' job.
@@ -64,6 +72,13 @@ type Route struct {
 
 	Handler     fiber.Handler
 	Middlewares []fiber.Handler // run before Handler, on this route only
+}
+
+// Response is a Responses value with its own description, which otherwise is
+// the status text, e.g. to say when a 409 happens.
+type Response struct {
+	Description string
+	Body        any // as a plain Responses value: nil for none, ErrorDocument{} on an error status
 }
 
 // API registers routes on a Fiber router and collects their description.
@@ -123,9 +138,12 @@ func (a *API) Add(routes ...Route) {
 		for _, m := range r.Middlewares {
 			chain = append(chain, m)
 		}
-		// After Middlewares, so an unauthenticated caller learns nothing about the query.
-		if names := requiredQuery(r.Query); len(names) > 0 {
+		// After Middlewares, so an unauthenticated caller learns nothing about the request.
+		if names := requiredParams(r.Query, "query"); len(names) > 0 {
 			chain = append(chain, requireQuery(names))
+		}
+		if names := requiredParams(r.Headers, "header"); len(names) > 0 {
+			chain = append(chain, requireHeaders(names))
 		}
 		chain = append(chain, r.Handler)
 		a.router.Add([]string{r.Method}, r.Path, chain[0], chain[1:]...)
@@ -212,10 +230,21 @@ func (d *document) add(prefix string, r Route) {
 	defer d.mu.Unlock()
 
 	var params []any
-	for _, m := range pathParam.FindAllStringSubmatch(r.Path, -1) {
-		params = append(params, map[string]any{
-			"name": m[1], "in": "path", "required": true, "schema": map[string]any{"type": "string"},
-		})
+	byName := map[string]map[string]any{}
+	for _, m := range pathParam.FindAllStringSubmatch(prefix+r.Path, -1) {
+		p := map[string]any{"name": m[1], "in": "path", "required": true, "schema": map[string]any{"type": "string"}}
+		byName[m[1]] = p
+		params = append(params, p)
+	}
+	for _, f := range tagged(r.PathParams, "path") {
+		p, ok := byName[f.name]
+		if !ok {
+			panic("xttp: PathParams names " + f.name + ", which is not in path " + r.Path)
+		}
+		p["schema"] = d.schema(f.field.Type)
+		if doc := f.field.Tag.Get("doc"); doc != "" {
+			p["description"] = doc
+		}
 	}
 	path := pathParam.ReplaceAllString(prefix+r.Path, "{$1}")
 
@@ -241,9 +270,8 @@ func (d *document) add(prefix string, r Route) {
 		op["security"] = security
 	}
 
-	if r.Query != nil {
-		params = append(params, d.queryParams(reflect.TypeOf(r.Query))...)
-	}
+	params = append(params, d.params(r.Query, "query")...)
+	params = append(params, d.params(r.Headers, "header")...)
 	set("parameters", params, len(params) > 0)
 
 	if r.Body != nil {
@@ -276,6 +304,12 @@ func (d *document) add(prefix string, r Route) {
 // with ErrorDocument{}, is the JSON:API document ErrorHandler sends.
 func (d *document) response(code int, body any) map[string]any {
 	resp := map[string]any{"description": http.StatusText(code)}
+	if r, ok := body.(Response); ok {
+		body = r.Body
+		if r.Description != "" {
+			resp["description"] = r.Description
+		}
+	}
 	_, isDoc := body.(ErrorDocument)
 	switch {
 	case code >= 400 && (body == nil || isDoc):
@@ -286,42 +320,63 @@ func (d *document) response(code int, body any) map[string]any {
 	return resp
 }
 
-// requiredQuery lists the `required:"true"` parameters of a Route.Query.
-func requiredQuery(query any) []string {
-	if query == nil {
+// taggedField is a field of a parameter struct with its parameter name.
+type taggedField struct {
+	name  string
+	field reflect.StructField
+}
+
+// tagged lists the fields of the struct v carrying tag, skipping "-". A nil v has none.
+func tagged(v any, tag string) []taggedField {
+	if v == nil {
 		return nil
 	}
-	t := reflect.TypeOf(query)
+	t := reflect.TypeOf(v)
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	var names []string
+	var out []taggedField
 	for i := range t.NumField() {
 		f := t.Field(i)
-		name, _, _ := strings.Cut(f.Tag.Get("query"), ",")
-		if name != "" && name != "-" && f.Tag.Get("required") == "true" {
-			names = append(names, name)
+		if name, _, _ := strings.Cut(f.Tag.Get(tag), ","); name != "" && name != "-" {
+			out = append(out, taggedField{name, f})
+		}
+	}
+	return out
+}
+
+// requiredParams lists the `required:"true"` parameters of a Route.Query or Route.Headers.
+func requiredParams(v any, tag string) []string {
+	var names []string
+	for _, f := range tagged(v, tag) {
+		if f.field.Tag.Get("required") == "true" {
+			names = append(names, f.name)
 		}
 	}
 	return names
 }
 
-func (d *document) queryParams(t reflect.Type) []any {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+// reservedHeader reports a header name OpenAPI ignores as a parameter.
+func reservedHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "accept", "content-type", "authorization":
+		return true
 	}
+	return false
+}
+
+// params documents the query or header parameters of a Route.Query or Route.Headers.
+func (d *document) params(v any, in string) []any {
 	var out []any
-	for i := range t.NumField() {
-		f := t.Field(i)
-		name, _, _ := strings.Cut(f.Tag.Get("query"), ",")
-		if name == "" || name == "-" {
-			continue
+	for _, f := range tagged(v, in) {
+		if in == "header" && reservedHeader(f.name) {
+			panic("xttp: Headers cannot describe " + f.name + "; OpenAPI ignores it as a parameter (use Security for credentials)")
 		}
-		p := map[string]any{"name": name, "in": "query", "schema": d.schema(f.Type)}
-		if f.Tag.Get("required") == "true" {
+		p := map[string]any{"name": f.name, "in": in, "schema": d.schema(f.field.Type)}
+		if f.field.Tag.Get("required") == "true" {
 			p["required"] = true
 		}
-		if doc := f.Tag.Get("doc"); doc != "" {
+		if doc := f.field.Tag.Get("doc"); doc != "" {
 			p["description"] = doc
 		}
 		out = append(out, p)

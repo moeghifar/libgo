@@ -194,3 +194,29 @@ func TestPrincipalAndSecurityDoc(t *testing.T) {
 	}()
 	api.Add(Route{Method: "GET", Path: "/y", Security: []string{"nope"}, Handler: func(fiber.Ctx) error { return nil }})
 }
+
+func TestRequiredHeaderRunsAfterAuth(t *testing.T) {
+	api := New(Config{})
+	api.Add(Route{Method: "POST", Path: "/x", Headers: ActionHeaders{}, Middlewares: []fiber.Handler{BearerTokens("t")},
+		Handler: func(c fiber.Ctx) error { return c.SendString(c.Get("Idempotency-Key")) }})
+	auth := map[string]string{"Authorization": "Bearer t"}
+
+	tests := []struct {
+		name    string
+		headers map[string]string
+		status  int
+		body    string
+	}{
+		{"no auth", nil, 401, ""},
+		{"missing", auth, 400, `"header":"Idempotency-Key"`},
+		{"required header present", map[string]string{"Authorization": "Bearer t", "Idempotency-Key": "k1"}, 200, "k1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, b := call(t, api, "POST", "/x", "", tt.headers)
+			if s != tt.status || !strings.Contains(b, tt.body) {
+				t.Fatalf("got %d %s, want %d containing %q", s, b, tt.status, tt.body)
+			}
+		})
+	}
+}

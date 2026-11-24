@@ -19,7 +19,9 @@ func TestOutboundLog(t *testing.T) {
 		next rtFunc
 		want []string
 	}{
-		{"ok", func(*http.Request) (*http.Response, error) { return &http.Response{StatusCode: 200, ContentLength: 5}, nil },
+		{"ok", func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, ContentLength: 5}, nil
+		},
 			[]string{"level=INFO", "status=200", "size=5", "host=api.test", "path=/v1/users"}},
 		{"4xx", func(*http.Request) (*http.Response, error) { return &http.Response{StatusCode: 404}, nil }, []string{"level=WARN", "status=404"}},
 		{"5xx", func(*http.Request) (*http.Response, error) { return &http.Response{StatusCode: 502}, nil }, []string{"level=ERROR", "status=502"}},

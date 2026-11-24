@@ -62,7 +62,7 @@ func TestLevelFilterAndNilCtx(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Fatalf("below Warn logged: %s", buf.String())
 	}
-	Warn(nil, "kept") //nolint:staticcheck
+	Warn(nil, "kept") //nolint:staticcheck // nil ctx is the case under test
 	if !strings.Contains(buf.String(), `"msg":"kept"`) {
 		t.Fatalf("got %s", buf.String())
 	}

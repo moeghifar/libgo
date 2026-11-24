@@ -231,7 +231,7 @@ func (d *document) add(prefix string, r Route) {
 
 	var params []any
 	byName := map[string]map[string]any{}
-	for _, m := range pathParam.FindAllStringSubmatch(r.Path, -1) {
+	for _, m := range pathParam.FindAllStringSubmatch(prefix+r.Path, -1) {
 		p := map[string]any{"name": m[1], "in": "path", "required": true, "schema": map[string]any{"type": "string"}}
 		byName[m[1]] = p
 		params = append(params, p)

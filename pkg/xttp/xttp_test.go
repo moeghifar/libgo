@@ -407,3 +407,18 @@ func TestAddPanicsOnBadParams(t *testing.T) {
 		})
 	}
 }
+
+func TestPathParamsFromGroupPrefix(t *testing.T) {
+	_, api := newAPI()
+	api.Group("/orgs/:org").Add(Route{
+		Method: fiber.MethodGet, Path: "/users/:id",
+		PathParams: struct {
+			Org int `path:"org"`
+		}{},
+		Handler: func(c fiber.Ctx) error { return nil },
+	})
+	params := get(t, api.Spec(), "paths", "/orgs/{org}/users/{id}", "get", "parameters").([]any)
+	if len(params) != 2 || get(t, params[0], "name") != "org" || get(t, params[0], "schema", "type") != "integer" {
+		t.Fatalf("params = %v, want org (integer) then id", params)
+	}
+}

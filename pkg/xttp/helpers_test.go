@@ -209,7 +209,7 @@ func TestRequiredHeaderRunsAfterAuth(t *testing.T) {
 	}{
 		{"no auth", nil, 401, ""},
 		{"missing", auth, 400, `"header":"Idempotency-Key"`},
-		{"optional header may be absent", map[string]string{"Authorization": "Bearer t", "Idempotency-Key": "k1"}, 200, "k1"},
+		{"required header present", map[string]string{"Authorization": "Bearer t", "Idempotency-Key": "k1"}, 200, "k1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

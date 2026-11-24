@@ -1,6 +1,6 @@
 # Hardened image for the example service. Build from the repo root: make docker
 # Base images are pinned by digest; Dependabot bumps them.
-FROM cgr.dev/chainguard/go:latest@sha256:8348380e90a63090904e1b124c387c61e68801e9d8f7e8a3784e83cd7d154be1 AS builder
+FROM cgr.dev/chainguard/go:latest@sha256:97b081e091e2c7df54b30f468969ea2e62d7d1a64fff89346facb564da979300 AS builder
 
 WORKDIR /workdir
 

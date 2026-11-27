@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	github.com/gofiber/fiber/v3 v3.7.0
 	github.com/joho/godotenv v1.5.1
-	github.com/valyala/fasthttp v1.79.0
+	github.com/valyala/fasthttp v1.80.0
 )
 
 require (
